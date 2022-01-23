@@ -1,5 +1,6 @@
 from typing import List, Set, Tuple
 from copy import deepcopy
+import random
 
 import torch
 import torch.nn as nn
@@ -108,15 +109,18 @@ class StateEncoder:
     def get_state(self):
         return self.players_state, self.board_state, self.discard_pile_state, self.blue_tokens, self.red_tokens
 
-
 class ActionDecoder:
-    def __init__(self, outputs: torch.tensor) -> None:
+    def __init__(self, outputs: torch.tensor, eps=1.0) -> None:
         assert outputs.size()[0] == 60
         self.outputs = outputs
+        self.eps = eps
 
     def get_action(self):
         _, action_idx = torch.max(self.outputs, 0)
         idx = int(action_idx)
+
+        if random.random() < self.eps:
+            idx = random.randint(0, int(self.outputs.size()[0]) - 1)
 
         if idx < 5:
             return PlayMove(idx), action_idx
@@ -138,15 +142,15 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
         # players have an initial dimension which is [bs, 2 * n. players, 5, 5]
-        self.players_conv1 = nn.Conv2d(10, 32, 1, groups=2)
-        self.players_conv2 = nn.Conv2d(32, 32, 1)
+        self.players_conv1 = nn.Conv2d(10, 50, 1, groups=5)
+        self.players_conv2 = nn.Conv2d(50, 50, 1)
 
-        self.full_conv1 = nn.Conv2d(34, 64, 1)
-        self.full_conv2 = nn.Conv2d(64, 64 * 5 * 5, (5, 5))
+        #self.full_conv1 = nn.Conv2d(50 + 2, 64, 1)
+        self.full_conv = nn.Conv2d(50 + 2, (50 + 2) * 5 * 5, (5, 5))
 
-        self.fc1 = nn.Linear(64 * 5 * 5 + 2, 384)
-        self.fc2 = nn.Linear(384, 192)
-        self.fc3 = nn.Linear(192, 60)
+        self.fc1 = nn.Linear((50 + 2) * 5 * 5 + 2, 192)
+        self.fc2 = nn.Linear(192, 96)
+        self.fc3 = nn.Linear(96, 60)
 
     def forward(self, players_state, board_state, discard_pile_state, blue_tokens, red_tokens):
         players_state = torch.unsqueeze(players_state, 0)
@@ -160,8 +164,7 @@ class Net(nn.Module):
         x = torch.cat([x, board_state, discard_pile_state], 0)
         x = x.unsqueeze(0)
 
-        x = self.full_conv1(x)
-        x = self.full_conv2(x)
+        x = F.relu(self.full_conv(x))
 
         x = torch.flatten(x, 1)  # flatten all dimensions except batch
         x = torch.hstack([x, torch.tensor([blue_tokens, red_tokens]).unsqueeze(0)])
@@ -190,7 +193,7 @@ class DRLAgent(Player):
         self.actions = []
         self.optimizer.zero_grad()
 
-    def step(self, proxy: "PlayerGameProxy"):
+    def step(self, proxy: "PlayerGameProxy", eps=1.0):
         players_state = [proxy.see_hand(p) for p in [proxy.get_player(), *proxy.get_other_players()]]
         board_state = proxy.see_board()
         discard_pile_state = proxy.see_discard_pile()
@@ -199,7 +202,7 @@ class DRLAgent(Player):
 
         Q, probs = self.model(*encoded_state.get_state())
         
-        action, action_idx = ActionDecoder(probs).get_action()
+        action, action_idx = ActionDecoder(probs, eps).get_action()
         if isinstance(action, HintMove):
             action.player = [proxy.get_player(), *proxy.get_other_players()][action.player].name
 
@@ -209,6 +212,9 @@ class DRLAgent(Player):
         self.actions.append(action_idx)
 
         return action
+    
+    def receive_reward(self, reward: float):
+        self.targets.append(reward)
 
     def train(self, reward):
         if len(self.Qs) == 0:

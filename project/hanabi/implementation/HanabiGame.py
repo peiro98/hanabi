@@ -13,6 +13,8 @@ from statistics import mean
 
 HAND_SIZE = 5
 
+eps = 1.0
+
 
 class HanabiGame:
     """An Hanabi game."""
@@ -216,7 +218,11 @@ class PlayerGameProxy:
         ]
 
     def step(self):
-        return self.player.step(self)
+        global eps
+        return self.player.step(self, eps)
+
+    def give_reward(self, reward: float):
+        self.player.receive_reward(reward)
 
     def see_hand(self, player: Optional[Player]) -> List[Tuple[Card, List[Hint]]]:
         hand = self.game.get_hand_of_player(player or self.player)
@@ -261,6 +267,9 @@ if __name__ == "__main__":
                 p.prepare()
             game.register_player(p)
         game.start()
+
+        eps = eps * 0.9999
+        print(eps)
 
         scores.append(game.score())
         print(f"Mean: {statistics.mean(scores[-100:])}")
