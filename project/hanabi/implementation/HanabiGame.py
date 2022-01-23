@@ -1,13 +1,15 @@
+import statistics
 from typing import Optional, List, Tuple
 import itertools
 from functools import reduce
 from operator import add
-
 from Hint import ColorHint, Hint, ValueHint
 
 from Card import Card, Deck
 from Move import DiscardMove, HintColorMove, HintMove, PlayMove
 from Player import *
+from Learning import DRLAgent
+from statistics import mean
 
 HAND_SIZE = 5
 
@@ -27,7 +29,7 @@ class HanabiGame:
         self.discard_pile = []
 
         # number of blue tokens left
-        self.blue_tokens = 3
+        self.blue_tokens = 8
         # number of red tokens left
         self.red_tokens = 3
 
@@ -107,6 +109,8 @@ class HanabiGame:
     def start(self):
         self.__generate_hands()
 
+        illegal = False
+
         # iterate over players and hands until the game is over
         for proxy, hand in itertools.cycle(zip(self.player_proxies, self.hands)):
             if self.red_tokens < 0 or self.deck.is_empty():
@@ -151,6 +155,10 @@ class HanabiGame:
                 # TODO: verify the player actually exist
                 other = self.__find_player_by_name(move.player)
 
+                if self.blue_tokens <= 0:
+                    illegal = True
+                    break # TODO: need to find a better strategy to signal a wrong move
+
                 print(f"Player {proxy.get_player()} hints {move}")
 
                 if isinstance(move, HintColorMove):
@@ -160,7 +168,12 @@ class HanabiGame:
 
                 self.blue_tokens -= 1
 
-            self.__print_state()
+            # self.__print_state()
+
+        for p in self.player_proxies:
+            if isinstance(p.get_player(), DRLAgent):
+                p.get_player().train(self.score() if not illegal else -5)
+                #p.get_player().train(self.score())
 
         print("Final score: ", self.score())
 
@@ -218,11 +231,24 @@ class PlayerGameProxy:
 
 
 if __name__ == "__main__":
-    game = HanabiGame()
-    game.register_player(PrompterAgent("Martha"))
-    game.register_player(NaiveAgent("Jonas"))
-    game.register_player(RiskAverseAgent("Ulrich"))
-    game.register_player(NaiveAgent("Claudia"))
-    game.register_player(ConstantAgent("Noah"))
+    players = [
+        DRLAgent("Martha"),
+        DRLAgent("Jonas"),
+        DRLAgent("Ulrich"),
+        DRLAgent("Claudia"),
+        DRLAgent("Noah")
+    ]
 
-    game.start()
+    scores = []
+    for i in range(10000):
+        game = HanabiGame()
+        print(f"#{i}")
+        
+        for p in players:
+            if isinstance(p, DRLAgent):
+                p.prepare()
+            game.register_player(p)
+        game.start()
+
+        scores.append(game.score())
+        print(f"Mean: {statistics.mean(scores[-100:])}")

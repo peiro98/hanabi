@@ -1,3 +1,6 @@
+from typing import Union
+
+
 class PlayMove:
     def __init__(self, index) -> None:
         # TODO: the constraints must depend on the player's hand size (dynamic)
@@ -46,7 +49,7 @@ class HintColorMove(HintMove):
 
 
 class HintValueMove(HintMove):
-    def __init__(self, player: str, value: str) -> None:
+    def __init__(self, player: Union[str, int], value: str) -> None:
         # TODO: dynamically verify the value
         super(__class__, self).__init__(player)
         self.value = value
