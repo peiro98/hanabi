@@ -55,6 +55,8 @@ class StateEncoder:
         players: List[List[Tuple[Card, Set[Hint]]]],
         board: List[Card],
         discard_pile: List[Card],
+        blue_tokens: int,
+        red_tokens: int
     ) -> None:
         n_player = len(players)
 
@@ -100,8 +102,11 @@ class StateEncoder:
 
             self.discard_pile_state[color_idx, value_idx] = 1
 
+        self.blue_tokens = blue_tokens
+        self.red_tokens = red_tokens
+
     def get_state(self):
-        return self.players_state, self.board_state, self.discard_pile_state
+        return self.players_state, self.board_state, self.discard_pile_state, self.blue_tokens, self.red_tokens
 
 
 class ActionDecoder:
@@ -139,11 +144,11 @@ class Net(nn.Module):
         self.full_conv1 = nn.Conv2d(34, 64, 1)
         self.full_conv2 = nn.Conv2d(64, 64 * 5 * 5, (5, 5))
 
-        self.fc1 = nn.Linear(64 * 5 * 5, 384)
+        self.fc1 = nn.Linear(64 * 5 * 5 + 2, 384)
         self.fc2 = nn.Linear(384, 192)
         self.fc3 = nn.Linear(192, 60)
 
-    def forward(self, players_state, board_state, discard_pile_state):
+    def forward(self, players_state, board_state, discard_pile_state, blue_tokens, red_tokens):
         players_state = torch.unsqueeze(players_state, 0)
         x = F.relu(self.players_conv1(players_state))
         x = F.relu(self.players_conv2(x))
@@ -159,6 +164,8 @@ class Net(nn.Module):
         x = self.full_conv2(x)
 
         x = torch.flatten(x, 1)  # flatten all dimensions except batch
+        x = torch.hstack([x, torch.tensor([blue_tokens, red_tokens]).unsqueeze(0)])
+
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         Q = self.fc3(x).flatten()
@@ -175,8 +182,8 @@ class DRLAgent(Player):
         self.Qs = []
         self.actions = []
 
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 0.5)
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=.1)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
 
     def prepare(self):
         self.Qs = []
@@ -188,7 +195,7 @@ class DRLAgent(Player):
         board_state = proxy.see_board()
         discard_pile_state = proxy.see_discard_pile()
 
-        encoded_state = StateEncoder(players_state, board_state, discard_pile_state)
+        encoded_state = StateEncoder(players_state, board_state, discard_pile_state, proxy.count_blue_tokens(), proxy.count_red_tokens())
 
         Q, probs = self.model(*encoded_state.get_state())
         
