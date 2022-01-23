@@ -64,24 +64,24 @@ class StateEncoder:
         # 1. compute the player state
 
         self.players_state = torch.zeros(
-            (n_player * 2, len(CARD_COLORS), len(CARD_VALUES))
+            (n_player * 10, len(CARD_COLORS), len(CARD_VALUES))
         )
 
         for player_idx, player_state in enumerate(players):
-            for card, hints in player_state:
+            for card_idx, (card, hints) in enumerate(player_state):
                 if card.color and card.value:
                     color_idx = CARD_COLORS.index(card.color)
                     value_idx = CARD_VALUES.index(card.value)
 
-                    self.players_state[2 * player_idx, color_idx, value_idx] = 1
+                    self.players_state[10 * player_idx + 2 * card_idx, color_idx, value_idx] = 1
 
                 for hint in hints:
                     if isinstance(hint, ColorHint):
                         color_idx = CARD_COLORS.index(hint.color)
-                        self.players_state[2 * player_idx + 1, color_idx, :] = 1
+                        self.players_state[10 * player_idx + 2 * card_idx + 1, color_idx, :] = 1
                     elif isinstance(hint, ValueHint):
                         value_idx = CARD_VALUES.index(card.value)
-                        self.players_state[2 * player_idx + 1, :, value_idx] = 1
+                        self.players_state[10 * player_idx + 2 * card_idx + 1, :, value_idx] = 1
 
         # 2. compute the board state
 
@@ -120,7 +120,17 @@ class ActionDecoder:
         idx = int(action_idx)
 
         if random.random() < self.eps:
-            idx = random.randint(0, int(self.outputs.size()[0]) - 1)
+            c = random.choice(range(3))
+            if c == 0:
+                # random move
+                idx = random.choice(range(5))
+            elif c == 1:
+                # random hint
+                idx = random.randint(5, 54)
+            else:
+                idx = random.randint(55, 59)
+        # if random.random() < self.eps:
+        #     idx = random.randint(0, int(self.outputs.size()[0]) - 1)
 
         if idx < 5:
             return PlayMove(idx), action_idx
@@ -142,8 +152,8 @@ class Net(nn.Module):
         super(Net, self).__init__()
 
         # players have an initial dimension which is [bs, 2 * n. players, 5, 5]
-        self.players_conv1 = nn.Conv2d(10, 50, 1, groups=5)
-        self.players_conv2 = nn.Conv2d(50, 50, 1)
+        self.players_conv1 = nn.Conv2d(50, 100, 1)
+        self.players_conv2 = nn.Conv2d(100, 50, 1)
 
         #self.full_conv1 = nn.Conv2d(50 + 2, 64, 1)
         self.full_conv = nn.Conv2d(50 + 2, (50 + 2) * 5 * 5, (5, 5))
@@ -185,8 +195,8 @@ class DRLAgent(Player):
         self.Qs = []
         self.actions = []
 
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=.1)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=.01)
+        # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
 
     def prepare(self):
         self.Qs = []
@@ -201,6 +211,9 @@ class DRLAgent(Player):
         encoded_state = StateEncoder(players_state, board_state, discard_pile_state, proxy.count_blue_tokens(), proxy.count_red_tokens())
 
         Q, probs = self.model(*encoded_state.get_state())
+
+        # print(Q)
+        # print(probs)
         
         action, action_idx = ActionDecoder(probs, eps).get_action()
         if isinstance(action, HintMove):
@@ -232,4 +245,4 @@ class DRLAgent(Player):
         loss = F.mse_loss(torch.cat([q.unsqueeze(0) for q in self.Qs]), targets)
         loss.backward()
         self.optimizer.step()
-        self.scheduler.step()
+        #self.scheduler.step()

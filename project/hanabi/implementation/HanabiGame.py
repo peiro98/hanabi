@@ -4,6 +4,7 @@ import itertools
 from functools import reduce
 from operator import add
 from Hint import ColorHint, Hint, ValueHint
+from random import shuffle
 
 from Card import Card, Deck
 from Move import DiscardMove, HintColorMove, HintMove, PlayMove
@@ -174,7 +175,7 @@ class HanabiGame:
 
         for p in self.player_proxies:
             if isinstance(p.get_player(), DRLAgent):
-                p.get_player().train(self.score() if not illegal else -25)
+                p.get_player().train(self.score() if not illegal else -1)
                 #p.get_player().train(self.score())
 
         print("Final score: ", self.score())
@@ -262,13 +263,14 @@ if __name__ == "__main__":
         game = HanabiGame()
         print(f"#{i}")
         
+        shuffle(players)
         for p in players:
             if isinstance(p, DRLAgent):
                 p.prepare()
             game.register_player(p)
         game.start()
 
-        eps = eps * 0.9999
+        eps = eps * 0.9995
         print(eps)
 
         scores.append(game.score())
