@@ -183,7 +183,7 @@ class Net(nn.Module):
         x = F.relu(self.fc2(x))
         Q = self.fc3(x).flatten()
 
-        return Q, F.softmax(Q)
+        return Q, F.softmax(Q, dim=0)
 
 
 class DRLAgent(Player):
@@ -191,16 +191,23 @@ class DRLAgent(Player):
         super().__init__(name)
         self.model = Net()
 
-        self.discount = discount
-        self.Qs = []
-        self.actions = []
+        def init_weights(m):
+            if isinstance(m, nn.Linear):
+                torch.nn.init.uniform_(m.weight, 0)
+                m.bias.data.fill_(0)
 
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=.01)
+        self.model.apply(init_weights)
+        self.discount = discount
+
+        self.states = []
+        self.Qs = []
+
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1)
         # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
 
     def prepare(self):
+        self.states = []
         self.Qs = []
-        self.actions = []
         self.optimizer.zero_grad()
 
     def step(self, proxy: "PlayerGameProxy", eps=1.0):
@@ -209,20 +216,17 @@ class DRLAgent(Player):
         discard_pile_state = proxy.see_discard_pile()
 
         encoded_state = StateEncoder(players_state, board_state, discard_pile_state, proxy.count_blue_tokens(), proxy.count_red_tokens())
+        self.states.append(deepcopy(encoded_state))
 
         Q, probs = self.model(*encoded_state.get_state())
 
-        # print(Q)
-        # print(probs)
-        
-        action, action_idx = ActionDecoder(probs, eps).get_action()
+        action, _ = ActionDecoder(probs, eps).get_action()
         if isinstance(action, HintMove):
             action.player = [proxy.get_player(), *proxy.get_other_players()][action.player].name
 
         # log the state
         # self.states.append(deepcopy(encoded_state))
         self.Qs.append(Q)
-        self.actions.append(action_idx)
 
         return action
     
@@ -233,16 +237,23 @@ class DRLAgent(Player):
         if len(self.Qs) == 0:
             return
 
-        discounted_rewards = [reward * (self.discount ** i) for i in range(len(self.Qs))][::-1]
+        # discounted_rewards = [reward * (self.discount ** i) for i in range(len(self.Qs))][::-1]
 
         # q values for this run
         # Q = torch.zeros((len(self.states), 60))
-        targets = torch.zeros((len(self.Qs), 60))
-        for i, (idx, reward) in enumerate(zip(self.actions, discounted_rewards)):
-            # Q[i, idx] = reward
-            targets[i, idx] = reward
+        # targets = torch.zeros((len(self.Qs), 60))
+        # for i, (idx, reward) in enumerate(zip(self.actions, discounted_rewards)):
+        #     # Q[i, idx] = reward
+        #     targets[i, idx] = reward
 
-        loss = F.mse_loss(torch.cat([q.unsqueeze(0) for q in self.Qs]), targets)
+        target_Q = torch.zeros((len(self.states), 60))
+        for i, (old_Q) in enumerate(self.Qs):
+            if i == len(self.Qs) - 1:
+                target_Q[i] = old_Q + 0.1 * (reward - old_Q)
+            else:
+                target_Q[i] = old_Q + 0.1 * (self.discount * torch.max(self.Qs[i+1]) - old_Q)
+        
+        loss = F.mse_loss(torch.cat([q.unsqueeze(0) for q in self.Qs]), target_Q)
         loss.backward()
         self.optimizer.step()
         #self.scheduler.step()

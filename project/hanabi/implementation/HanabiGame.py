@@ -175,8 +175,7 @@ class HanabiGame:
 
         for p in self.player_proxies:
             if isinstance(p.get_player(), DRLAgent):
-                p.get_player().train(self.score() if not illegal else -1)
-                #p.get_player().train(self.score())
+                p.get_player().train(self.score())
 
         print("Final score: ", self.score())
 
@@ -251,15 +250,6 @@ if __name__ == "__main__":
 
     scores = []
     for i in range(10000):
-        # if i > 100 and i % 25 == 0:
-        #     params = [p.model.state_dict() for p in players]
-        #     parameters = {
-        #         k: 1 / len(players) * sum(pp[k] for pp in params)
-        #         for k in players[0].model.state_dict().keys()
-        #     }
-        #     for p in players:
-        #         p.model.load_state_dict(parameters)
-
         game = HanabiGame()
         print(f"#{i}")
         
