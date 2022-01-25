@@ -10,7 +10,6 @@ from Card import Card, Deck
 from Move import DiscardMove, HintColorMove, HintMove, PlayMove
 from Player import *
 from Learning import DRLAgent
-from statistics import mean
 
 HAND_SIZE = 5
 
@@ -160,7 +159,7 @@ class HanabiGame:
 
                 if self.blue_tokens <= 0:
                     illegal = True
-                    break # TODO: need to find a better strategy to signal a wrong move
+                    break  # TODO: need to find a better strategy to signal a wrong move
 
                 print(f"Player {proxy.get_player()} hints {move}")
 
@@ -241,18 +240,18 @@ class PlayerGameProxy:
 
 if __name__ == "__main__":
     players = [
-        DRLAgent("Martha"),
-        DRLAgent("Jonas"),
-        DRLAgent("Ulrich"),
-        DRLAgent("Claudia"),
-        DRLAgent("Noah")
+        DRLAgent("Martha", n_players=2),
+        DRLAgent("Jonas", n_players=2),
+        # DRLAgent("Ulrich"),
+        # DRLAgent("Claudia"),
+        # DRLAgent("Noah")
     ]
 
     scores = []
     for i in range(10000):
         game = HanabiGame()
         print(f"#{i}")
-        
+
         shuffle(players)
         for p in players:
             if isinstance(p, DRLAgent):

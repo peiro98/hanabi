@@ -57,15 +57,13 @@ class StateEncoder:
         board: List[Card],
         discard_pile: List[Card],
         blue_tokens: int,
-        red_tokens: int
+        red_tokens: int,
     ) -> None:
         n_player = len(players)
 
         # 1. compute the player state
 
-        self.players_state = torch.zeros(
-            (n_player * 10, len(CARD_COLORS), len(CARD_VALUES))
-        )
+        self.players_state = torch.zeros((n_player * 10, len(CARD_COLORS), len(CARD_VALUES)))
 
         for player_idx, player_state in enumerate(players):
             for card_idx, (card, hints) in enumerate(player_state):
@@ -109,9 +107,11 @@ class StateEncoder:
     def get_state(self):
         return self.players_state, self.board_state, self.discard_pile_state, self.blue_tokens, self.red_tokens
 
+
 class ActionDecoder:
-    def __init__(self, outputs: torch.tensor, eps=1.0) -> None:
-        assert outputs.size()[0] == 60
+    def __init__(self, n_players, outputs: torch.tensor, eps=1.0) -> None:
+        assert outputs.size()[0] == 10 + 10 * n_players
+        self.n_players = n_players
         self.outputs = outputs
         self.eps = eps
 
@@ -126,9 +126,9 @@ class ActionDecoder:
                 idx = random.choice(range(5))
             elif c == 1:
                 # random hint
-                idx = random.randint(5, 54)
+                idx = random.randint(5, 5 + 10 * self.n_players - 1)
             else:
-                idx = random.randint(55, 59)
+                idx = random.randint(5 + 10 * self.n_players - 1, 5 + 10 * self.n_players - 1 + 5)
         # if random.random() < self.eps:
         #     idx = random.randint(0, int(self.outputs.size()[0]) - 1)
 
@@ -136,31 +136,33 @@ class ActionDecoder:
             return PlayMove(idx), action_idx
 
         idx = idx - 5
-        if idx < 25:
+        if idx < 5 * self.n_players:
             return HintValueMove(idx // 5, CARD_VALUES[idx % 5]), action_idx
 
-        idx = idx - 25
-        if idx < 25:
+        idx = idx - 5 * self.n_players
+        if idx < 5 * self.n_players:
             return HintColorMove(idx // 5, CARD_COLORS[idx % 5]), action_idx
 
-        idx = idx - 25
+        idx = idx - 5 * self.n_players
         return DiscardMove(idx), action_idx
 
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, n_players=5):
         super(Net, self).__init__()
 
+        input_size = 10 * n_players
+
         # players have an initial dimension which is [bs, 2 * n. players, 5, 5]
-        self.players_conv1 = nn.Conv2d(50, 100, 1)
-        self.players_conv2 = nn.Conv2d(100, 50, 1)
+        self.players_conv1 = nn.Conv2d(input_size, input_size * 2, 1)
+        self.players_conv2 = nn.Conv2d(input_size * 2, input_size, 1)
 
-        #self.full_conv1 = nn.Conv2d(50 + 2, 64, 1)
-        self.full_conv = nn.Conv2d(50 + 2, (50 + 2) * 5 * 5, (5, 5))
+        # self.full_conv1 = nn.Conv2d(50 + 2, 64, 1)
+        self.full_conv = nn.Conv2d(input_size + 2, (input_size + 2) * 5 * 5, (5, 5))
 
-        self.fc1 = nn.Linear((50 + 2) * 5 * 5 + 2, 192)
+        self.fc1 = nn.Linear((input_size + 2) * 5 * 5 + 2, 192)
         self.fc2 = nn.Linear(192, 96)
-        self.fc3 = nn.Linear(96, 60)
+        self.fc3 = nn.Linear(96, 10 + 10 * n_players)
 
     def forward(self, players_state, board_state, discard_pile_state, blue_tokens, red_tokens):
         players_state = torch.unsqueeze(players_state, 0)
@@ -168,8 +170,8 @@ class Net(nn.Module):
         x = F.relu(self.players_conv2(x))
 
         x = x.squeeze()
-        board_state = board_state.reshape((1, 5, 5)) #torch.unsqueeze(board_state, 0)
-        discard_pile_state = discard_pile_state.reshape((1, 5, 5)) # torch.unsqueeze(discard_pile_state, 0)
+        board_state = board_state.reshape((1, 5, 5))  # torch.unsqueeze(board_state, 0)
+        discard_pile_state = discard_pile_state.reshape((1, 5, 5))  # torch.unsqueeze(discard_pile_state, 0)
         # x = torch.hstack([x, board_state, discard_pile_state])
         x = torch.cat([x, board_state, discard_pile_state], 0)
         x = x.unsqueeze(0)
@@ -187,9 +189,10 @@ class Net(nn.Module):
 
 
 class DRLAgent(Player):
-    def __init__(self, name: str, discount=0.98) -> None:
+    def __init__(self, name: str, discount=0.98, n_players=5) -> None:
         super().__init__(name)
-        self.model = Net()
+        self.n_players = n_players
+        self.model = Net(n_players)
 
         def init_weights(m):
             if isinstance(m, nn.Linear):
@@ -215,12 +218,18 @@ class DRLAgent(Player):
         board_state = proxy.see_board()
         discard_pile_state = proxy.see_discard_pile()
 
-        encoded_state = StateEncoder(players_state, board_state, discard_pile_state, proxy.count_blue_tokens(), proxy.count_red_tokens())
+        encoded_state = StateEncoder(
+            players_state,
+            board_state,
+            discard_pile_state,
+            proxy.count_blue_tokens(),
+            proxy.count_red_tokens(),
+        )
         self.states.append(deepcopy(encoded_state))
 
         Q, probs = self.model(*encoded_state.get_state())
 
-        action, _ = ActionDecoder(probs, eps).get_action()
+        action, _ = ActionDecoder(self.n_players, probs, eps).get_action()
         if isinstance(action, HintMove):
             action.player = [proxy.get_player(), *proxy.get_other_players()][action.player].name
 
@@ -229,7 +238,7 @@ class DRLAgent(Player):
         self.Qs.append(Q)
 
         return action
-    
+
     def receive_reward(self, reward: float):
         self.targets.append(reward)
 
@@ -246,14 +255,15 @@ class DRLAgent(Player):
         #     # Q[i, idx] = reward
         #     targets[i, idx] = reward
 
-        target_Q = torch.zeros((len(self.states), 60))
+        target_Q = torch.zeros((len(self.Qs), self.Qs[0].size()[0]))
         for i, (old_Q) in enumerate(self.Qs):
             if i == len(self.Qs) - 1:
                 target_Q[i] = old_Q + 0.1 * (reward - old_Q)
             else:
-                target_Q[i] = old_Q + 0.1 * (self.discount * torch.max(self.Qs[i+1]) - old_Q)
-        
+                target_Q[i] = old_Q + 0.1 * (self.discount * torch.max(self.Qs[i + 1]) - old_Q)
+
         loss = F.mse_loss(torch.cat([q.unsqueeze(0) for q in self.Qs]), target_Q)
         loss.backward()
+        print(loss.item())
         self.optimizer.step()
-        #self.scheduler.step()
+        # self.scheduler.step()
