@@ -1,5 +1,5 @@
 from typing import List, Optional
-from random import shuffle
+from random import shuffle, seed
 from itertools import product
 
 from Hint import ColorHint, Hint, ValueHint
@@ -73,11 +73,10 @@ def build_cards_deck() -> List[Card]:
 
 
 class Deck:
-    def __init__(self, randomize=True) -> None:
+    def __init__(self) -> None:
         # load and shuffle the cards deck
         self.cards = build_cards_deck()
-        if randomize:
-            shuffle(self.cards)
+        shuffle(self.cards)
 
     def pick_card(self) -> Card:
         if not self.cards:

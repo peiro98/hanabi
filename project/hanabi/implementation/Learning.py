@@ -109,28 +109,29 @@ class StateEncoder:
 
 
 class ActionDecoder:
-    def __init__(self, n_players, outputs: torch.tensor, eps=1.0) -> None:
-        assert outputs.size()[0] == 10 + 10 * n_players
+    def __init__(self, n_players, Q: torch.tensor, eps=1.0) -> None:
+        assert Q.size()[0] == 10 + 10 * n_players
         self.n_players = n_players
-        self.outputs = outputs
+        self.Q = Q
         self.eps = eps
 
     def get_action(self):
-        _, action_idx = torch.max(self.outputs, 0)
-        idx = int(action_idx)
+        _, action_idx = torch.max(self.Q, 0)
 
-        if random.random() < 0.05:
+        if random.random() < 0.5:
             c = random.choice(range(3))
             if c == 0:
                 # random move
-                idx = random.choice(range(5))
+                action_idx = random.choice(range(5))
             elif c == 1:
                 # random hint
-                idx = random.randint(5, 5 + 10 * self.n_players - 1)
+                action_idx = random.randint(5, 5 + 10 * self.n_players - 1)
             else:
-                idx = random.randint(5 + 10 * self.n_players - 1, 5 + 10 * self.n_players - 1 + 5)
+                action_idx = random.randint(5 + 10 * self.n_players - 1, 5 + 10 * self.n_players - 1 + 5)
         # if random.random() < self.eps:
         #     idx = random.randint(0, int(self.outputs.size()[0]) - 1)
+
+        idx = int(action_idx)
 
         if idx < 5:
             return PlayMove(idx), action_idx
@@ -189,11 +190,12 @@ class Net(nn.Module):
 
 
 class DRLAgent(TrainablePlayer):
-    def __init__(self, name: str, n_players=5) -> None:
+    def __init__(self, name: str, n_players=5, discount=0.95, training=True) -> None:
         super().__init__(name)
         self.n_players = n_players
         self.model = Net(n_players)
         self.discount = discount
+        self.training = training
 
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1)
         # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
@@ -206,8 +208,16 @@ class DRLAgent(TrainablePlayer):
         self.states = []
         self.rewards = []
         self.Qs = []
+        self.actions = []
 
         self.optimizer.zero_grad()
+
+    def clear_illegal_moves(self, Q, proxy):
+        Q[5:10] = 0
+        Q[5 + 5 * self.n_players:5 + 5 * self.n_players + 5] = 0
+        if proxy.count_blue_tokens() == 0:
+            Q[5:5 + 10 * self.n_players] = 0
+        return Q
 
     def step(self, proxy: "PlayerGameProxy", eps=1.0):
         players_state = [proxy.see_hand(p) for p in [proxy.get_player(), *proxy.get_other_players()]]
@@ -223,11 +233,12 @@ class DRLAgent(TrainablePlayer):
         )
         self.states.append(deepcopy(encoded_state))
 
-        Q, probs = self.model(*encoded_state.get_state())
+        Q, _ = self.model(*encoded_state.get_state())
+        Q = self.clear_illegal_moves(Q, proxy)
 
         action = None
         while action is None or (isinstance(action, HintMove) and (action.player == 0 or proxy.count_blue_tokens() <= 0)):
-            action, _ = ActionDecoder(self.n_players, probs, eps).get_action()
+            action, action_idx = ActionDecoder(self.n_players, Q, eps).get_action()
 
         if isinstance(action, HintMove):
             action.player = [proxy.get_player(), *proxy.get_other_players()][action.player].name
@@ -236,6 +247,7 @@ class DRLAgent(TrainablePlayer):
         # self.states.append(deepcopy(encoded_state))
         self.Qs.append(Q)
         self.rewards.append(0)
+        self.actions.append(action_idx)
 
         return action
 
@@ -243,7 +255,7 @@ class DRLAgent(TrainablePlayer):
         self.rewards[-1] += reward
 
     def train(self):
-        if len(self.Qs) == 0:
+        if len(self.Qs) == 0 or not self.training:
             return
 
         # discounted_rewards = [reward * (self.discount ** i) for i in range(len(self.Qs))][::-1]
@@ -255,14 +267,24 @@ class DRLAgent(TrainablePlayer):
         #     # Q[i, idx] = reward
         #     targets[i, idx] = reward
 
+        # target_Q = torch.zeros((len(self.Qs), self.Qs[0].size()[0]))
+        # for i, (reward, old_Q, action) in enumerate(zip(self.rewards, self.Qs, self.actions)):
+        #     if i == len(self.Qs) - 1:
+        #         target_Q[i][action] = old_Q + 0.1 * (reward - old_Q)
+        #     else:
+        #         target_Q[i][action] = old_Q + 0.1 * (reward + self.discount * torch.max(self.Qs[i + 1]) - old_Q)
+
+        # loss = F.mse_loss(torch.cat([q.unsqueeze(0) for q in self.Qs]), target_Q)
+
         target_Q = torch.zeros((len(self.Qs), self.Qs[0].size()[0]))
-        for i, (reward, old_Q) in enumerate(zip(self.rewards, self.Qs)):
+        for i, (reward, action) in enumerate(zip(self.rewards, self.actions)):
             if i == len(self.Qs) - 1:
-                target_Q[i] = old_Q + 0.1 * (reward - old_Q)
+                target_Q[i][action] = reward
             else:
-                target_Q[i] = old_Q + 0.1 * (reward + self.discount * torch.max(self.Qs[i + 1]) - old_Q)
+                target_Q[i][action] = reward + self.discount * torch.max(self.Qs[i + 1])
 
         loss = F.mse_loss(torch.cat([q.unsqueeze(0) for q in self.Qs]), target_Q)
+
         loss.backward()
         print(loss.item())
         self.optimizer.step()

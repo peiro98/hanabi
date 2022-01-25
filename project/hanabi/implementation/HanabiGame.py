@@ -17,18 +17,30 @@ HAND_SIZE = 5
 eps = 0.05
 
 REWARDS = {
-    "PLAYED_WRONG_CARD": -10,
-    "PLAYED_CARD_WITHOUT_HINTS": -7.5,
-    "PLAYED_CARD_WITH_ONLY_ONE_HINT": -2.5,
-    "DISCARDED_CARD_WITHOUT_HINTS": -5,
-    "DISCARDED_CARD_WITH_ONLY_ONE_HINT": -2,
+    # "PLAYED_WRONG_CARD": -10,
+    # "PLAYED_CARD_WITHOUT_HINTS": -7.5,
+    # "PLAYED_CARD_WITH_ONLY_ONE_HINT": -2.5,
+    # "DISCARDED_CARD_WITHOUT_HINTS": -5,
+    # "DISCARDED_CARD_WITH_ONLY_ONE_HINT": -2,
+    # "DISCARDED_UNPLAYABLE_CARD": 0,
+    # "DISCARDED_PLAYABLE_CARD": -0.5,
+    # "PLAYED_CORRECT_CARD": 10,
+    # "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": 0.2,
+    # "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": 0.1,
+    # "HINTED_FULLY_KNOWN_CARD": -5,
+    # "ILLEGAL": -25
+    "PLAYED_WRONG_CARD": 0,
+    "PLAYED_CARD_WITHOUT_HINTS": 0,
+    "PLAYED_CARD_WITH_ONLY_ONE_HINT": 0,
+    "DISCARDED_CARD_WITHOUT_HINTS": 0,
+    "DISCARDED_CARD_WITH_ONLY_ONE_HINT": 0,
     "DISCARDED_UNPLAYABLE_CARD": 0,
-    "DISCARDED_PLAYABLE_CARD": -0.5,
-    "PLAYED_CORRECT_CARD": 10,
-    "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": 0.2,
-    "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": 0.1,
-    "HINTED_FULLY_KNOWN_CARD": -5,
-    "ILLEGAL": -25
+    "DISCARDED_PLAYABLE_CARD": 0,
+    "PLAYED_CORRECT_CARD": 1,
+    "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": 0,
+    "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": 0,
+    "HINTED_FULLY_KNOWN_CARD": 0,
+    "ILLEGAL": 0
 }
 
 
@@ -52,7 +64,7 @@ class HanabiGame:
         self.red_tokens = 3
 
         # cards deck
-        self.deck = Deck(randomize=False)
+        self.deck = Deck()
 
         self.game_started = False
 
@@ -206,12 +218,12 @@ class HanabiGame:
 
             # self.__print_state()
 
-        
         for p in self.player_proxies:
+            p.reward_player(self.score())
             if isinstance(p.get_player(), DRLAgent):
                 p.get_player().train()
         
-        print("Final score: ", self.score())
+        print("Final score: ", self.score() )
 
     def __print_state(self):
         print(f"Blue tokens: {self.blue_tokens:2d}.")
@@ -279,21 +291,22 @@ class PlayerGameProxy:
 
 if __name__ == "__main__":
     players = [
-        DRLAgent("Martha", n_players=2),
-        # PrompterAgent("Jonas")
-        DRLAgent("Jonas", n_players=2),
-        # DRLAgent("Ulrich"),
-        # DRLAgent("Claudia"),
-        # DRLAgent("Noah")
+        DRLAgent("Martha", n_players=4, training=True),
+        #DiscardAgent("Jonas")
+        DRLAgent("Jonas", n_players=4, training=True),
+        DRLAgent("Ulrich", n_players=4, training=True),
+        DRLAgent("Claudia", n_players=4, training=True),
+        # DRLAgent("Noah", n_players=4)
     ]
 
     scores = []
-    for i in range(10000):
+    for i in range(100000):
         game = HanabiGame()
         print(f"#{i}")
 
         shuffle(players)
         for p in players:
+            p.training = (i // 50) % 2 == 0
             if isinstance(p, DRLAgent):
                 p.prepare()
             game.register_player(p)
@@ -303,4 +316,4 @@ if __name__ == "__main__":
         # print(eps)
 
         scores.append(game.score())
-        print(f"Mean: {statistics.mean(scores[-100:])}")
+        print(f"Mean: {statistics.mean(scores)}")
