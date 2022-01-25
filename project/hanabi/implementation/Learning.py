@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from Hint import ColorHint, Hint, ValueHint
 from Card import Card, CARD_VALUES, CARD_COLORS
-from Player import Player
+from Player import TrainablePlayer
 from Move import (
     DiscardMove,
     HintColorMove,
@@ -119,7 +119,7 @@ class ActionDecoder:
         _, action_idx = torch.max(self.outputs, 0)
         idx = int(action_idx)
 
-        if random.random() < self.eps:
+        if random.random() < 0.05:
             c = random.choice(range(3))
             if c == 0:
                 # random move
@@ -154,7 +154,7 @@ class Net(nn.Module):
         input_size = 10 * n_players
 
         # players have an initial dimension which is [bs, 2 * n. players, 5, 5]
-        self.players_conv1 = nn.Conv2d(input_size, input_size * 2, 1)
+        self.players_conv1 = nn.Conv2d(input_size, input_size * 2, 1, groups=n_players)
         self.players_conv2 = nn.Conv2d(input_size * 2, input_size, 1)
 
         # self.full_conv1 = nn.Conv2d(50 + 2, 64, 1)
@@ -188,29 +188,25 @@ class Net(nn.Module):
         return Q, F.softmax(Q, dim=0)
 
 
-class DRLAgent(Player):
-    def __init__(self, name: str, discount=0.98, n_players=5) -> None:
+class DRLAgent(TrainablePlayer):
+    def __init__(self, name: str, n_players=5) -> None:
         super().__init__(name)
         self.n_players = n_players
         self.model = Net(n_players)
-
-        def init_weights(m):
-            if isinstance(m, nn.Linear):
-                torch.nn.init.uniform_(m.weight, 0)
-                m.bias.data.fill_(0)
-
-        self.model.apply(init_weights)
         self.discount = discount
-
-        self.states = []
-        self.Qs = []
 
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1)
         # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
 
     def prepare(self):
+        """Reset the state of the player
+        
+        This method must be called before starting a new game.
+        """
         self.states = []
+        self.rewards = []
         self.Qs = []
+
         self.optimizer.zero_grad()
 
     def step(self, proxy: "PlayerGameProxy", eps=1.0):
@@ -229,20 +225,24 @@ class DRLAgent(Player):
 
         Q, probs = self.model(*encoded_state.get_state())
 
-        action, _ = ActionDecoder(self.n_players, probs, eps).get_action()
+        action = None
+        while action is None or (isinstance(action, HintMove) and (action.player == 0 or proxy.count_blue_tokens() <= 0)):
+            action, _ = ActionDecoder(self.n_players, probs, eps).get_action()
+
         if isinstance(action, HintMove):
             action.player = [proxy.get_player(), *proxy.get_other_players()][action.player].name
 
         # log the state
         # self.states.append(deepcopy(encoded_state))
         self.Qs.append(Q)
+        self.rewards.append(0)
 
         return action
 
     def receive_reward(self, reward: float):
-        self.targets.append(reward)
+        self.rewards[-1] += reward
 
-    def train(self, reward):
+    def train(self):
         if len(self.Qs) == 0:
             return
 
@@ -256,11 +256,11 @@ class DRLAgent(Player):
         #     targets[i, idx] = reward
 
         target_Q = torch.zeros((len(self.Qs), self.Qs[0].size()[0]))
-        for i, (old_Q) in enumerate(self.Qs):
+        for i, (reward, old_Q) in enumerate(zip(self.rewards, self.Qs)):
             if i == len(self.Qs) - 1:
                 target_Q[i] = old_Q + 0.1 * (reward - old_Q)
             else:
-                target_Q[i] = old_Q + 0.1 * (self.discount * torch.max(self.Qs[i + 1]) - old_Q)
+                target_Q[i] = old_Q + 0.1 * (reward + self.discount * torch.max(self.Qs[i + 1]) - old_Q)
 
         loss = F.mse_loss(torch.cat([q.unsqueeze(0) for q in self.Qs]), target_Q)
         loss.backward()

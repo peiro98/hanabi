@@ -52,6 +52,21 @@ class Player(ABC):
         return self.name
 
 
+class TrainablePlayer(Player):
+
+    @abstractmethod
+    def prepare(self):
+        pass
+
+    @abstractmethod
+    def receive_reward(self, reward):
+        pass
+
+    @abstractmethod
+    def train(self):
+        pass
+
+
 class ConstantAgent(Player):
     """Naive agent that always plays the first card in its hand"""
 

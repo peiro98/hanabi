@@ -1,3 +1,4 @@
+from ast import Constant
 import statistics
 from typing import Optional, List, Tuple
 import itertools
@@ -13,7 +14,22 @@ from Learning import DRLAgent
 
 HAND_SIZE = 5
 
-eps = 1.0
+eps = 0.05
+
+REWARDS = {
+    "PLAYED_WRONG_CARD": -10,
+    "PLAYED_CARD_WITHOUT_HINTS": -7.5,
+    "PLAYED_CARD_WITH_ONLY_ONE_HINT": -2.5,
+    "DISCARDED_CARD_WITHOUT_HINTS": -5,
+    "DISCARDED_CARD_WITH_ONLY_ONE_HINT": -2,
+    "DISCARDED_UNPLAYABLE_CARD": 0,
+    "DISCARDED_PLAYABLE_CARD": -0.5,
+    "PLAYED_CORRECT_CARD": 10,
+    "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": 0.2,
+    "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": 0.1,
+    "HINTED_FULLY_KNOWN_CARD": -5,
+    "ILLEGAL": -25
+}
 
 
 class HanabiGame:
@@ -36,7 +52,7 @@ class HanabiGame:
         self.red_tokens = 3
 
         # cards deck
-        self.deck = Deck()
+        self.deck = Deck(randomize=False)
 
         self.game_started = False
 
@@ -126,7 +142,7 @@ class HanabiGame:
             # TODO: move the move management to separate functions (or directly inside move)
             if isinstance(move, PlayMove):
                 # extract the card to play
-                card, _ = hand.pop(move.index)
+                card, hints = hand.pop(move.index)
 
                 # TODO: replace with logging function
                 print(f"Player {proxy.get_player()} plays {card}")
@@ -134,16 +150,23 @@ class HanabiGame:
                 if self.__is_playable(card):
                     # play the card and grant one blue token
                     self.board.append(card)
+                    proxy.reward_player(REWARDS["PLAYED_CORRECT_CARD"])
                 else:
                     # move the card in the discard pile and remove one red token
                     self.discard_pile.append(card)
                     self.red_tokens -= 1
+                    proxy.reward_player(REWARDS["PLAYED_WRONG_CARD"])
+
+                if len(hints) == 0:
+                    proxy.reward_player(REWARDS["PLAYED_CARD_WITHOUT_HINTS"])
+                elif len(hints) == 1:
+                    proxy.reward_player(REWARDS["PLAYED_CARD_WITH_ONLY_ONE_HINT"])
 
                 # refill the hand
                 hand.insert(0, (self.deck.pick_card(), set()))
             elif isinstance(move, DiscardMove):
                 # extract the card to discard
-                card, _ = hand.pop(move.index)
+                card, hints = hand.pop(move.index)
 
                 print(f"Player {proxy.get_player()} discards {card}")
 
@@ -151,15 +174,26 @@ class HanabiGame:
                 self.discard_pile.append(card)
                 self.blue_tokens += 1
 
+                if len(hints) == 0:
+                    proxy.reward_player(REWARDS["DISCARDED_CARD_WITHOUT_HINTS"])
+                elif len(hints) == 1:
+                    proxy.reward_player(REWARDS["DISCARDED_CARD_WITH_ONLY_ONE_HINT"])
+
+                if not self.__is_playable(card):
+                    proxy.reward_player(REWARDS["DISCARDED_UNPLAYABLE_CARD"])
+                else:
+                    proxy.reward_player(REWARDS["DISCARDED_PLAYABLE_CARD"])
+
                 # refill the hand
                 hand.insert(0, (self.deck.pick_card(), set()))
             elif isinstance(move, HintMove):
                 # TODO: verify the player actually exist
                 other = self.__find_player_by_name(move.player)
 
-                if self.blue_tokens <= 0:
-                    illegal = True
-                    break  # TODO: need to find a better strategy to signal a wrong move
+                if self.blue_tokens <= 0 or proxy.get_player() == other:
+                    proxy.reward_player(REWARDS["ILLEGAL"])
+                    # illegal = True
+                    # break
 
                 print(f"Player {proxy.get_player()} hints {move}")
 
@@ -172,10 +206,11 @@ class HanabiGame:
 
             # self.__print_state()
 
+        
         for p in self.player_proxies:
             if isinstance(p.get_player(), DRLAgent):
-                p.get_player().train(self.score())
-
+                p.get_player().train()
+        
         print("Final score: ", self.score())
 
     def __print_state(self):
@@ -218,7 +253,7 @@ class PlayerGameProxy:
 
     def step(self):
         global eps
-        return self.player.step(self, eps)
+        return self.player.step(self)
 
     def give_reward(self, reward: float):
         self.player.receive_reward(reward)
@@ -237,10 +272,15 @@ class PlayerGameProxy:
     def see_discard_pile(self):
         return self.game.get_discard_pile()
 
+    def reward_player(self, reward):
+        if isinstance(self.player, TrainablePlayer):
+            self.player.receive_reward(reward)
+
 
 if __name__ == "__main__":
     players = [
         DRLAgent("Martha", n_players=2),
+        # PrompterAgent("Jonas")
         DRLAgent("Jonas", n_players=2),
         # DRLAgent("Ulrich"),
         # DRLAgent("Claudia"),
@@ -259,8 +299,8 @@ if __name__ == "__main__":
             game.register_player(p)
         game.start()
 
-        eps = eps * 0.9995
-        print(eps)
+        #eps = eps * 0.9995
+        # print(eps)
 
         scores.append(game.score())
         print(f"Mean: {statistics.mean(scores[-100:])}")

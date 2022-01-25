@@ -73,10 +73,11 @@ def build_cards_deck() -> List[Card]:
 
 
 class Deck:
-    def __init__(self) -> None:
+    def __init__(self, randomize=True) -> None:
         # load and shuffle the cards deck
         self.cards = build_cards_deck()
-        shuffle(self.cards)
+        if randomize:
+            shuffle(self.cards)
 
     def pick_card(self) -> Card:
         if not self.cards:
