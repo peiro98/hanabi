@@ -219,7 +219,7 @@ class HanabiGame:
             # self.__print_state()
 
         for p in self.player_proxies:
-            p.reward_player(self.score())
+            # p.reward_player(self.score())
             if isinstance(p.get_player(), DRLAgent):
                 p.get_player().train()
         
@@ -291,11 +291,11 @@ class PlayerGameProxy:
 
 if __name__ == "__main__":
     players = [
-        DRLAgent("Martha", n_players=4, training=True),
+        DRLAgent("Martha", n_players=2, training=True),
         #DiscardAgent("Jonas")
-        DRLAgent("Jonas", n_players=4, training=True),
-        DRLAgent("Ulrich", n_players=4, training=True),
-        DRLAgent("Claudia", n_players=4, training=True),
+        DRLAgent("Jonas", n_players=2, training=True),
+        #DRLAgent("Ulrich", n_players=4, training=True),
+        #DRLAgent("Claudia", n_players=4, training=True),
         # DRLAgent("Noah", n_players=4)
     ]
 
@@ -306,7 +306,7 @@ if __name__ == "__main__":
 
         shuffle(players)
         for p in players:
-            p.training = (i // 50) % 2 == 0
+            #p.training = (i // 50) % 2 == 0
             if isinstance(p, DRLAgent):
                 p.prepare()
             game.register_player(p)

@@ -38,10 +38,10 @@ from Move import (
 #   ...                     |=> 5
 #   play card 5             -
 #   hint 1 to player 1      -
-#   ...                     |=> 25
+#   ...                     |=> 20
 #   hint 5 to player 5      -
 #   hint red to player 1    -
-#   ...                     |=> 25
+#   ...                     |=> 20
 #   hint yellow to player 5 -
 #   discard 1               -
 #   ...                     |=> 5
@@ -111,7 +111,7 @@ class StateEncoder:
 
 class ActionDecoder:
     def __init__(self, n_players, Q: torch.tensor, eps=1.0) -> None:
-        assert Q.size()[0] == 10 + 10 * n_players
+        assert Q.size()[0] == 10 + 10 * (n_players - 1)
         self.n_players = n_players
         self.Q = Q
         self.eps = eps
@@ -119,16 +119,16 @@ class ActionDecoder:
     def get_action(self):
         _, action_idx = torch.max(self.Q, 0)
 
-        if random.random() < 0.5:
+        if random.random() < 0.1:
             c = random.choice(range(3))
             if c == 0:
                 # random move
                 action_idx = random.choice(range(5))
             elif c == 1:
                 # random hint
-                action_idx = random.randint(5, 5 + 10 * self.n_players - 1)
+                action_idx = random.randint(5, 5 + 10 * (self.n_players - 1) - 1)
             else:
-                action_idx = random.randint(5 + 10 * self.n_players - 1, 5 + 10 * self.n_players - 1 + 5)
+                action_idx = random.randint(5 + 10 * (self.n_players - 1) - 1, 5 + 10 * (self.n_players - 1) - 1 + 5)
         # if random.random() < self.eps:
         #     idx = random.randint(0, int(self.outputs.size()[0]) - 1)
 
@@ -138,14 +138,14 @@ class ActionDecoder:
             return PlayMove(idx), action_idx
 
         idx = idx - 5
-        if idx < 5 * self.n_players:
+        if idx < 5 * (self.n_players - 1):
             return HintValueMove(idx // 5, CARD_VALUES[idx % 5]), action_idx
 
-        idx = idx - 5 * self.n_players
-        if idx < 5 * self.n_players:
+        idx = idx - 5 * (self.n_players - 1)
+        if idx < 5 * (self.n_players - 1):
             return HintColorMove(idx // 5, CARD_COLORS[idx % 5]), action_idx
 
-        idx = idx - 5 * self.n_players
+        idx = idx - 5 * (self.n_players - 1)
         return DiscardMove(idx), action_idx
 
 
@@ -164,7 +164,7 @@ class Net(nn.Module):
 
         self.fc1 = nn.Linear((input_size + 2) * 5 * 5 + 2, 192)
         self.fc2 = nn.Linear(192, 96)
-        self.fc3 = nn.Linear(96, 10 + 10 * n_players)
+        self.fc3 = nn.Linear(96, 10 + 10 * (n_players - 1))
 
     def forward(self, players_state, board_state, discard_pile_state, blue_tokens, red_tokens):
         players_state = torch.unsqueeze(players_state, 0)
@@ -200,7 +200,7 @@ class DRLAgent(TrainablePlayer):
 
         self.experience = []
 
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1)
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=.01)
         # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
 
     def prepare(self):
@@ -216,10 +216,8 @@ class DRLAgent(TrainablePlayer):
         self.model.eval()
 
     def clear_illegal_moves(self, Q, proxy):
-        Q[5:10] = 0
-        Q[5 + 5 * self.n_players:5 + 5 * self.n_players + 5] = 0
         if proxy.count_blue_tokens() == 0:
-            Q[5:5 + 10 * self.n_players] = 0
+            Q[5:5 + 10 * (self.n_players - 1)] = 0
         return Q
 
     def __get_encoded_state(self, proxy: "PlayerGameProxy"):
@@ -246,7 +244,7 @@ class DRLAgent(TrainablePlayer):
             action, action_idx = ActionDecoder(self.n_players, Q, eps).get_action()
 
         if isinstance(action, HintMove):
-            action.player = [proxy.get_player(), *proxy.get_other_players()][action.player].name
+            action.player = proxy.get_other_players()[action.player].name
 
         # log the state
         # self.states.append(deepcopy(encoded_state))
@@ -287,7 +285,7 @@ class DRLAgent(TrainablePlayer):
                 best_Q = 0
 
             # compute the target Q
-            size = 10 + 10 * self.n_players
+            size = 10 + 10 * (self.n_players - 1)
             tq = torch.nn.functional.one_hot(torch.tensor(action), num_classes=size)
             tq = tq * (reward + self.discount * best_Q)
             target_Q.append(tq)
@@ -306,3 +304,9 @@ class DRLAgent(TrainablePlayer):
         print(loss.item())
         self.optimizer.step()
         # self.scheduler.step()
+
+        exp_with_reward = [(s, a, r, ns) for s, a, r, ns in self.experience if r > 0]
+        exp_without_reward = [(s, a, r, ns) for s, a, r, ns in self.experience if r == 0]
+        # self.experience = list(random.sample(self.experience, min(256, len(self.experience))))
+        self.experience = list(random.sample(exp_with_reward, min(256, len(exp_with_reward))))
+        self.experience += list(random.sample(exp_without_reward, min(256, len(exp_without_reward))))
