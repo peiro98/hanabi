@@ -1,3 +1,4 @@
+from os import stat
 from typing import List, Set, Tuple
 from copy import deepcopy
 import random
@@ -197,6 +198,8 @@ class DRLAgent(TrainablePlayer):
         self.discount = discount
         self.training = training
 
+        self.experience = []
+
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=1)
         # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
 
@@ -210,7 +213,7 @@ class DRLAgent(TrainablePlayer):
         self.Qs = []
         self.actions = []
 
-        self.optimizer.zero_grad()
+        self.model.eval()
 
     def clear_illegal_moves(self, Q, proxy):
         Q[5:10] = 0
@@ -219,19 +222,21 @@ class DRLAgent(TrainablePlayer):
             Q[5:5 + 10 * self.n_players] = 0
         return Q
 
-    def step(self, proxy: "PlayerGameProxy", eps=1.0):
+    def __get_encoded_state(self, proxy: "PlayerGameProxy"):
         players_state = [proxy.see_hand(p) for p in [proxy.get_player(), *proxy.get_other_players()]]
         board_state = proxy.see_board()
         discard_pile_state = proxy.see_discard_pile()
 
-        encoded_state = StateEncoder(
+        return StateEncoder(
             players_state,
             board_state,
             discard_pile_state,
             proxy.count_blue_tokens(),
             proxy.count_red_tokens(),
         )
-        self.states.append(deepcopy(encoded_state))
+
+    def step(self, proxy: "PlayerGameProxy", eps=1.0):
+        encoded_state = self.__get_encoded_state(proxy)
 
         Q, _ = self.model(*encoded_state.get_state())
         Q = self.clear_illegal_moves(Q, proxy)
@@ -245,6 +250,7 @@ class DRLAgent(TrainablePlayer):
 
         # log the state
         # self.states.append(deepcopy(encoded_state))
+        self.states.append(deepcopy(encoded_state))
         self.Qs.append(Q)
         self.rewards.append(0)
         self.actions.append(action_idx)
@@ -258,32 +264,43 @@ class DRLAgent(TrainablePlayer):
         if len(self.Qs) == 0 or not self.training:
             return
 
-        # discounted_rewards = [reward * (self.discount ** i) for i in range(len(self.Qs))][::-1]
+        # state, action, reward, new_state
+        for SARS in zip(self.states[:-1], self.actions[:-1], self.rewards[:-1], self.states[1:]):
+            self.experience.append(SARS)
 
-        # q values for this run
-        # Q = torch.zeros((len(self.states), 60))
-        # targets = torch.zeros((len(self.Qs), 60))
-        # for i, (idx, reward) in enumerate(zip(self.actions, discounted_rewards)):
-        #     # Q[i, idx] = reward
-        #     targets[i, idx] = reward
+        self.experience.append((self.states[-1], self.actions[-1], self.rewards[-1], None))
 
-        # target_Q = torch.zeros((len(self.Qs), self.Qs[0].size()[0]))
-        # for i, (reward, old_Q, action) in enumerate(zip(self.rewards, self.Qs, self.actions)):
-        #     if i == len(self.Qs) - 1:
-        #         target_Q[i][action] = old_Q + 0.1 * (reward - old_Q)
-        #     else:
-        #         target_Q[i][action] = old_Q + 0.1 * (reward + self.discount * torch.max(self.Qs[i + 1]) - old_Q)
+        batch_size = min(64, len(self.experience))
 
-        # loss = F.mse_loss(torch.cat([q.unsqueeze(0) for q in self.Qs]), target_Q)
+        input_states = []
+        target_Q = []
 
-        target_Q = torch.zeros((len(self.Qs), self.Qs[0].size()[0]))
-        for i, (reward, action) in enumerate(zip(self.rewards, self.actions)):
-            if i == len(self.Qs) - 1:
-                target_Q[i][action] = reward
+        for state, action, reward, next_state in random.sample(self.experience, batch_size):
+            if next_state is not None:
+                # compute the Q value for the next state
+                Q, probs = self.model(*next_state.get_state())
+                # compute the index of the best Q value
+                _, best_Q_idx = torch.max(probs, 0)
+                # take the best Q value
+                best_Q = Q[best_Q_idx]
             else:
-                target_Q[i][action] = reward + self.discount * torch.max(self.Qs[i + 1])
+                best_Q = 0
 
-        loss = F.mse_loss(torch.cat([q.unsqueeze(0) for q in self.Qs]), target_Q)
+            # compute the target Q
+            size = 10 + 10 * self.n_players
+            tq = torch.nn.functional.one_hot(torch.tensor(action), num_classes=size)
+            tq = tq * (reward + self.discount * best_Q)
+            target_Q.append(tq)
+
+            input_states.append(state)
+
+        self.model.train()
+        self.optimizer.zero_grad()
+
+        outputs = torch.cat([self.model(*state.get_state())[0].unsqueeze(0) for state in input_states])
+        target_Q = torch.cat([tq.unsqueeze(0) for tq in target_Q])
+        
+        loss = F.mse_loss(outputs, target_Q)
 
         loss.backward()
         print(loss.item())

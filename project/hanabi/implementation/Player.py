@@ -63,7 +63,7 @@ class TrainablePlayer(Player):
         pass
 
     @abstractmethod
-    def train(self):
+    def train(self, proxy: "PlayerGameProxy", reward: float):
         pass
 
 
