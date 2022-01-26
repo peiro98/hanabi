@@ -156,7 +156,7 @@ class Net(nn.Module):
         input_size = 10 * n_players
 
         # players have an initial dimension which is [bs, 2 * n. players, 5, 5]
-        self.players_conv1 = nn.Conv2d(input_size, input_size * 2, 1, groups=n_players)
+        self.players_conv1 = nn.Conv2d(input_size, input_size * 2, 1, groups=n_players*5)
         self.players_conv2 = nn.Conv2d(input_size * 2, input_size, 1)
 
         # self.full_conv1 = nn.Conv2d(50 + 2, 64, 1)
@@ -194,7 +194,10 @@ class DRLAgent(TrainablePlayer):
     def __init__(self, name: str, n_players=5, discount=0.95, training=True) -> None:
         super().__init__(name)
         self.n_players = n_players
+        
         self.model = Net(n_players)
+        self.frozen_model = Net(n_players)
+
         self.discount = discount
         self.training = training
 
@@ -214,6 +217,9 @@ class DRLAgent(TrainablePlayer):
         self.actions = []
 
         self.model.eval()
+
+    def refresh_frozen_model(self):
+        self.frozen_model.load_state_dict(self.model.state_dict())
 
     def __get_encoded_state(self, proxy: "PlayerGameProxy"):
         players_state = [proxy.see_hand(p) for p in [proxy.get_player(), *proxy.get_other_players()]]
@@ -273,7 +279,7 @@ class DRLAgent(TrainablePlayer):
         for state, action, reward, next_state in random.sample(self.experience, batch_size):
             if next_state is not None:
                 # compute the Q value for the next state
-                Q, probs = self.model(*next_state.get_state())
+                Q, probs = self.frozen_model(*next_state.get_state())
                 # compute the index of the best Q value
                 _, best_Q_idx = torch.max(probs, 0)
                 # take the best Q value

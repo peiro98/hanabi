@@ -136,16 +136,13 @@ class HanabiGame:
     def score(self) -> int:
         return len(self.board)
 
-    def start(self):
+    def start(self, *, early_stop_at=None):
         self.__generate_hands()
 
         illegal = False
 
         # iterate over players and hands until the game is over
-        i = 0
-        stop = 2
-        for proxy, hand in itertools.chain.from_iterable([zip(self.player_proxies, self.hands) for _ in range(3)]):
-            i = i + 1
+        for iter_index, (proxy, hand) in enumerate(itertools.cycle(zip(self.player_proxies, self.hands)), 1):
             if self.red_tokens < 0 or self.deck.is_empty():
                 break
 
@@ -226,7 +223,7 @@ class HanabiGame:
 
             # self.__print_state()
 
-            if i == stop:
+            if iter_index == (early_stop_at * len(self.player_proxies)):
                 break
 
         for p in self.player_proxies:
@@ -312,8 +309,11 @@ if __name__ == "__main__":
 
     scores = []
     for i in range(100_000):
-        game = HanabiGame(deck=PredictableDeck())
+        game = HanabiGame()
         print(f"#{i}")
+
+        if i % 250 == 0:
+            const_player.refresh_frozen_model()
 
         game_players = [const_player, *random.sample(players, 1)]
         # shuffle(game_players)
@@ -322,7 +322,8 @@ if __name__ == "__main__":
             if isinstance(p, DRLAgent):
                 p.prepare()
             game.register_player(p)
-        game.start()
+
+        game.start(early_stop_at=(i // 500 + 1) * 3)
 
         #eps = eps * 0.9995
         # print(eps)
