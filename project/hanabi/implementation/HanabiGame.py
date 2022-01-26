@@ -300,16 +300,16 @@ class PlayerGameProxy:
 
 
 if __name__ == "__main__":
-    const_player = DRLAgent("Martha", n_players=2, training=True)
+    const_player = DRLAgent("Martha", n_players=2, training=True, discount=0.5)
 
-    # players = [DRLAgent(f"Player-{i}", n_players=2) for i in range(1)]
+    players = [DRLAgent(f"Player-{i}", n_players=2, training=True, discount=0.5) for i in range(1)]
     # players = [ConstantAgent("Jeremy")]
-    players = [NaiveAgent("Idun")]
+    # players = [NaiveAgent("Idun")]
     best_score = 0
 
     scores = []
     for i in range(100_000):
-        game = HanabiGame()
+        game = HanabiGame(deck=PredictableDeck())
         print(f"#{i}")
 
         if i % 500 == 0:
@@ -323,8 +323,8 @@ if __name__ == "__main__":
                 p.prepare()
             game.register_player(p)
 
-        # game.start(early_stop_at=(i // 500 + 1) * 3)
-        game.start()
+        game.start(early_stop_at=(i // 500 + 1) * 3)
+        # game.start()
 
         #eps = eps * 0.9995
         # print(eps)

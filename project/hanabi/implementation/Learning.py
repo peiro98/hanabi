@@ -238,6 +238,8 @@ class DRLAgent(TrainablePlayer):
         Q, _ = self.model(*encoded_state.get_state())
         Q = Q.squeeze()
 
+        print(Q)
+
         action = None
         while action is None or (isinstance(action, HintMove) and proxy.count_blue_tokens() <= 0):
             action, action_idx = ActionDecoder(self.n_players, Q, eps).get_action()
