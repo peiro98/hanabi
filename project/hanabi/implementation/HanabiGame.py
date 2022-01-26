@@ -162,7 +162,11 @@ class HanabiGame:
                 if self.__is_playable(card):
                     # play the card and grant one blue token
                     self.board.append(card)
-                    proxy.reward_player(REWARDS["PLAYED_CORRECT_CARD"])
+                    for p in self.player_proxies:
+                        if p.get_player() == proxy.get_player():
+                            p.reward_player(REWARDS["PLAYED_CORRECT_CARD"])
+                        else:
+                            p.reward_player(REWARDS["PLAYED_CORRECT_CARD"] * .5)
                 else:
                     # move the card in the discard pile and remove one red token
                     self.discard_pile.append(card)
@@ -221,6 +225,8 @@ class HanabiGame:
         for p in self.player_proxies:
             # p.reward_player(self.score())
             if isinstance(p.get_player(), DRLAgent):
+                if self.score() == 0:
+                    p.reward_player(-1)
                 p.get_player().train()
         
         print("Final score: ", self.score() )
@@ -285,7 +291,7 @@ class PlayerGameProxy:
         return self.game.get_discard_pile()
 
     def reward_player(self, reward):
-        if isinstance(self.player, TrainablePlayer):
+        if isinstance(self.player, TrainablePlayer) and len(self.player.rewards) > 0:
             self.player.receive_reward(reward)
 
 
