@@ -292,11 +292,12 @@ class PlayerGameProxy:
 if __name__ == "__main__":
     const_player = DRLAgent("Martha", n_players=2, training=True)
 
-    players = [DRLAgent(f"Player-{i}", n_players=2) for i in range(100)]
+    players = [DRLAgent(f"Player-{i}", n_players=2) for i in range(1)]
+    # players = [ConstantAgent("Jeremy")]
     best_score = 0
 
     scores = []
-    for i in range(100000):
+    for i in range(100_000):
         game = HanabiGame()
         print(f"#{i}")
 

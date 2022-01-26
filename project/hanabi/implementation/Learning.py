@@ -119,7 +119,7 @@ class ActionDecoder:
     def get_action(self):
         _, action_idx = torch.max(self.Q, 0)
 
-        if random.random() < 0.1:
+        if random.random() < 0.5:
             c = random.choice(range(3))
             if c == 0:
                 # random move
@@ -185,7 +185,7 @@ class Net(nn.Module):
 
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        Q = self.fc3(x).flatten()
+        Q = F.relu(self.fc3(x).flatten())
 
         return Q, F.softmax(Q, dim=0)
 
@@ -200,7 +200,7 @@ class DRLAgent(TrainablePlayer):
 
         self.experience = []
 
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=.01)
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=.1)
         # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
 
     def prepare(self):
@@ -272,6 +272,7 @@ class DRLAgent(TrainablePlayer):
 
         input_states = []
         target_Q = []
+        actions_idxs = []
 
         for state, action, reward, next_state in random.sample(self.experience, batch_size):
             if next_state is not None:
@@ -290,12 +291,18 @@ class DRLAgent(TrainablePlayer):
             tq = tq * (reward + self.discount * best_Q)
             target_Q.append(tq)
 
+            actions_idxs.append(action)
+
             input_states.append(state)
 
         self.model.train()
         self.optimizer.zero_grad()
 
-        outputs = torch.cat([self.model(*state.get_state())[0].unsqueeze(0) for state in input_states])
+        outputs = torch.cat([
+            (self.model(*state.get_state())[0] * torch.nn.functional.one_hot(torch.tensor(action), num_classes=size)).unsqueeze(0) 
+            for state, action in zip(input_states, actions_idxs)
+        ])
+
         target_Q = torch.cat([tq.unsqueeze(0) for tq in target_Q])
         
         loss = F.mse_loss(outputs, target_Q)
@@ -308,5 +315,5 @@ class DRLAgent(TrainablePlayer):
         exp_with_reward = [(s, a, r, ns) for s, a, r, ns in self.experience if r > 0]
         exp_without_reward = [(s, a, r, ns) for s, a, r, ns in self.experience if r == 0]
         # self.experience = list(random.sample(self.experience, min(256, len(self.experience))))
-        self.experience = list(random.sample(exp_with_reward, min(256, len(exp_with_reward))))
-        self.experience += list(random.sample(exp_without_reward, min(256, len(exp_without_reward))))
+        self.experience = list(random.sample(exp_with_reward, min(4096, len(exp_with_reward))))
+        # self.experience += list(random.sample(exp_without_reward, min(1024, len(exp_without_reward))))
