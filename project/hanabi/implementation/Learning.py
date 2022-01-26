@@ -1,3 +1,6 @@
+from cmath import exp
+import itertools
+from operator import itemgetter
 from os import stat
 from typing import List, Set, Tuple
 from copy import deepcopy
@@ -48,7 +51,7 @@ from Move import (
 #   discard 5               -
 # ]
 
-eps = 1.0
+eps = 0.9999
 
 class StateEncoder:
     """Encode the game state in torch tensors"""
@@ -65,23 +68,27 @@ class StateEncoder:
 
         # 1. compute the player state
 
-        self.players_state = torch.zeros((n_player * 10, len(CARD_COLORS), len(CARD_VALUES)))
+        # self.players_state = torch.zeros((n_player * 10, len(CARD_COLORS), len(CARD_VALUES)))
+        ps = 5 * 20 * len(players)
+        self.players_state = torch.zeros((ps))
 
         for player_idx, player_state in enumerate(players):
             for card_idx, (card, hints) in enumerate(player_state):
                 if card.color and card.value:
                     color_idx = CARD_COLORS.index(card.color)
+                    self.players_state[100 * player_idx + 20 * card_idx + color_idx] = 1
+                
+                if card.value:
                     value_idx = CARD_VALUES.index(card.value)
+                    self.players_state[100 * player_idx + 20 * card_idx + 5 + value_idx] = 1
 
-                    self.players_state[10 * player_idx + 2 * card_idx, color_idx, value_idx] = 1
-
-                for hint in hints:
+                for i, hint in enumerate(hints):
                     if isinstance(hint, ColorHint):
                         color_idx = CARD_COLORS.index(hint.color)
-                        self.players_state[10 * player_idx + 2 * card_idx + 1, color_idx, :] = 1
+                        self.players_state[100 * player_idx + 20 * card_idx + 10 + i * 5 + color_idx] = 1
                     elif isinstance(hint, ValueHint):
                         value_idx = CARD_VALUES.index(card.value)
-                        self.players_state[10 * player_idx + 2 * card_idx + 1, :, value_idx] = 1
+                        self.players_state[100 * player_idx + 20 * card_idx + 10 + i * 5 + value_idx] = 1
 
         # 2. compute the board state
 
@@ -93,6 +100,8 @@ class StateEncoder:
 
             self.board_state[color_idx, value_idx] = 1
 
+        self.board_state = self.board_state.flatten()
+
         # 3. compute the discard pile state
 
         self.discard_pile_state = torch.zeros((len(CARD_COLORS), len(CARD_VALUES)))
@@ -103,6 +112,8 @@ class StateEncoder:
 
             self.discard_pile_state[color_idx, value_idx] = 1
 
+        self.discard_pile_state = self.discard_pile_state.flatten()
+
         self.blue_tokens = blue_tokens
         self.red_tokens = red_tokens
 
@@ -112,7 +123,6 @@ class StateEncoder:
 
 class ActionDecoder:
     def __init__(self, n_players, Q: torch.tensor, eps=1.0) -> None:
-        assert Q.size()[0] == 10 + 10 * (n_players - 1)
         self.n_players = n_players
         self.Q = Q
         self.eps = eps
@@ -153,39 +163,24 @@ class Net(nn.Module):
     def __init__(self, n_players=5):
         super(Net, self).__init__()
 
-        input_size = 10 * n_players
+        players_input_size = 100 * n_players # [40, 60, 80, 100]
+        output_size = 10 + 10 * (n_players - 1)
 
-        # players have an initial dimension which is [bs, 2 * n. players, 5, 5]
-        self.players_conv1 = nn.Conv2d(input_size, input_size * 2, 1, groups=n_players*5)
-        self.players_conv2 = nn.Conv2d(input_size * 2, input_size, 1)
-
-        # self.full_conv1 = nn.Conv2d(50 + 2, 64, 1)
-        self.full_conv = nn.Conv2d(input_size + 2, (input_size + 2) * 5 * 5, (5, 5))
-
-        self.fc1 = nn.Linear((input_size + 2) * 5 * 5 + 2, 192)
-        self.fc2 = nn.Linear(192, 96)
-        self.fc3 = nn.Linear(96, 10 + 10 * (n_players - 1))
+        input_size = players_input_size + 25 + 25 + 2 # player size + board + discard pile
+        self.fc1 = nn.Linear(input_size, input_size)
+        self.fc2 = nn.Linear(input_size, input_size)
+        self.fc3 = nn.Linear(input_size, output_size * 2)
+        self.fc4 = nn.Linear(output_size * 2, output_size)
 
     def forward(self, players_state, board_state, discard_pile_state, blue_tokens, red_tokens):
-        players_state = torch.unsqueeze(players_state, 0)
-        x = F.relu(self.players_conv1(players_state))
-        x = F.relu(self.players_conv2(x))
-
-        x = x.squeeze()
-        board_state = board_state.reshape((1, 5, 5))  # torch.unsqueeze(board_state, 0)
-        discard_pile_state = discard_pile_state.reshape((1, 5, 5))  # torch.unsqueeze(discard_pile_state, 0)
-        # x = torch.hstack([x, board_state, discard_pile_state])
-        x = torch.cat([x, board_state, discard_pile_state], 0)
+        x = torch.tensor([blue_tokens, red_tokens])
+        x = torch.cat([players_state, board_state, discard_pile_state, x])
         x = x.unsqueeze(0)
-
-        x = F.relu(self.full_conv(x))
-
-        x = torch.flatten(x, 1)  # flatten all dimensions except batch
-        x = torch.hstack([x, torch.tensor([blue_tokens, red_tokens]).unsqueeze(0)])
 
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        Q = F.relu(self.fc3(x).flatten())
+        x = F.relu(self.fc3(x))
+        Q = F.relu(self.fc4(x))
 
         return Q, F.softmax(Q, dim=0)
 
@@ -201,9 +196,10 @@ class DRLAgent(TrainablePlayer):
         self.discount = discount
         self.training = training
 
-        self.experience = []
+        self.positive_experience = []
+        self.zero_experience = []
 
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=.1)
+        self.optimizer = torch.optim.SGD(self.model.parameters(), momentum=0.9, lr=.1, weight_decay=1e-3)
         # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
 
     def prepare(self):
@@ -237,9 +233,10 @@ class DRLAgent(TrainablePlayer):
     def step(self, proxy: "PlayerGameProxy"):
         encoded_state = self.__get_encoded_state(proxy)
         global eps
-        eps = eps * 0.995
+        eps = eps * 0.9999
 
         Q, _ = self.model(*encoded_state.get_state())
+        Q = Q.squeeze()
 
         action = None
         while action is None or (isinstance(action, HintMove) and proxy.count_blue_tokens() <= 0):
@@ -265,57 +262,62 @@ class DRLAgent(TrainablePlayer):
             return
 
         # state, action, reward, new_state
-        for SARS in zip(self.states[:-1], self.actions[:-1], self.rewards[:-1], self.states[1:]):
-            self.experience.append(SARS)
+        for SARS in zip(self.states, self.actions, self.rewards, self.states[1:] + [None]):
+            if SARS[2] > 0:
+                self.positive_experience.append(SARS)
+            else:
+                self.zero_experience.append(SARS)
 
-        self.experience.append((self.states[-1], self.actions[-1], self.rewards[-1], None))
+        bs_positive = min(32, len(self.positive_experience))
+        bs_zero = min(32, len(self.zero_experience))
 
-        batch_size = min(64, len(self.experience))
+        self.frozen_model.eval()
 
         input_states = []
         target_Q = []
         actions_idxs = []
 
-        for state, action, reward, next_state in random.sample(self.experience, batch_size):
+        batch = itertools.chain(random.sample(self.positive_experience, bs_positive // 2), random.sample(self.zero_experience, bs_zero // 2))
+        for state, action, reward, next_state in batch:
             if next_state is not None:
                 # compute the Q value for the next state
                 Q, probs = self.frozen_model(*next_state.get_state())
                 # compute the index of the best Q value
+                Q = Q.squeeze()
+                probs = probs.squeeze()
                 _, best_Q_idx = torch.max(probs, 0)
                 # take the best Q value
                 best_Q = Q[best_Q_idx]
             else:
-                best_Q = 0
+                best_Q = torch.tensor(0)
 
             # compute the target Q
-            size = 10 + 10 * (self.n_players - 1)
-            tq = torch.nn.functional.one_hot(torch.tensor(action), num_classes=size)
-            tq = tq * (reward + self.discount * best_Q)
-            target_Q.append(tq)
+            # size = 10 + 10 * (self.n_players - 1)
+            # tq = torch.nn.functional.one_hot(torch.tensor(action), num_classes=size)
+            # tq = tq * (reward + self.discount * best_Q)
+            target_Q.append(reward + self.discount * best_Q)
 
             actions_idxs.append(action)
-
             input_states.append(state)
 
         self.model.train()
         self.optimizer.zero_grad()
 
+        target_Q = torch.tensor(target_Q)
+        target_Q.requires_grad = False
+
         outputs = torch.cat([
-            (self.model(*state.get_state())[0] * torch.nn.functional.one_hot(torch.tensor(action), num_classes=size)).unsqueeze(0) 
+            self.model(*state.get_state())[0].squeeze()[action].unsqueeze(0)
             for state, action in zip(input_states, actions_idxs)
         ])
-
-        target_Q = torch.cat([tq.unsqueeze(0) for tq in target_Q])
         
         loss = F.mse_loss(outputs, target_Q)
 
         loss.backward()
         print(loss.item())
         self.optimizer.step()
-        # self.scheduler.step()
+            # self.scheduler.step()
 
-        exp_with_reward = [(s, a, r, ns) for s, a, r, ns in self.experience if r > 0]
-        exp_without_reward = [(s, a, r, ns) for s, a, r, ns in self.experience if r == 0]
-        # self.experience = list(random.sample(self.experience, min(256, len(self.experience))))
-        self.experience = list(random.sample(exp_with_reward, min(4096, len(exp_with_reward))))
-        self.experience += list(random.sample(exp_without_reward, min(1024, len(exp_without_reward))))
+        self.positive_experience = list(random.sample(self.positive_experience, min(4096, len(self.positive_experience))))
+        # self.positive_experience = exp_with_reward[-8192:]
+        self.zero_experience += list(random.sample(self.zero_experience, min(4096, len(self.zero_experience))))

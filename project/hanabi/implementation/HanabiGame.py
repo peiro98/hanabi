@@ -223,7 +223,7 @@ class HanabiGame:
 
             # self.__print_state()
 
-            if iter_index == (early_stop_at * len(self.player_proxies)):
+            if early_stop_at and iter_index == (early_stop_at * len(self.player_proxies)):
                 break
 
         for p in self.player_proxies:
@@ -312,7 +312,7 @@ if __name__ == "__main__":
         game = HanabiGame()
         print(f"#{i}")
 
-        if i % 250 == 0:
+        if i % 500 == 0:
             const_player.refresh_frozen_model()
 
         game_players = [const_player, *random.sample(players, 1)]
@@ -323,7 +323,8 @@ if __name__ == "__main__":
                 p.prepare()
             game.register_player(p)
 
-        game.start(early_stop_at=(i // 500 + 1) * 3)
+        # game.start(early_stop_at=(i // 500 + 1) * 3)
+        game.start()
 
         #eps = eps * 0.9995
         # print(eps)
