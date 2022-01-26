@@ -290,22 +290,19 @@ class PlayerGameProxy:
 
 
 if __name__ == "__main__":
-    players = [
-        DRLAgent("Martha", n_players=2, training=True),
-        #DiscardAgent("Jonas")
-        DRLAgent("Jonas", n_players=2, training=True),
-        #DRLAgent("Ulrich", n_players=4, training=True),
-        #DRLAgent("Claudia", n_players=4, training=True),
-        # DRLAgent("Noah", n_players=4)
-    ]
+    const_player = DRLAgent("Martha", n_players=2, training=True)
+
+    players = [DRLAgent(f"Player-{i}", n_players=2) for i in range(100)]
+    best_score = 0
 
     scores = []
     for i in range(100000):
         game = HanabiGame()
         print(f"#{i}")
 
-        shuffle(players)
-        for p in players:
+        game_players = [const_player, *random.sample(players, 1)]
+        shuffle(game_players)
+        for p in game_players:
             #p.training = (i // 50) % 2 == 0
             if isinstance(p, DRLAgent):
                 p.prepare()
@@ -316,4 +313,6 @@ if __name__ == "__main__":
         # print(eps)
 
         scores.append(game.score())
-        print(f"Mean: {statistics.mean(scores)}")
+        if i:
+            scores = scores[-500:]
+            print(f"Mean: {statistics.mean(scores)}")
