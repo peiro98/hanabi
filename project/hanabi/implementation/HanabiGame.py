@@ -7,7 +7,7 @@ from operator import add
 from Hint import ColorHint, Hint, ValueHint
 from random import shuffle
 
-from Card import Card, Deck
+from Card import Card, Deck, PredictableDeck
 from Move import DiscardMove, HintColorMove, HintMove, PlayMove
 from Player import *
 from Learning import DRLAgent
@@ -47,7 +47,7 @@ REWARDS = {
 class HanabiGame:
     """An Hanabi game."""
 
-    def __init__(self) -> None:
+    def __init__(self, deck=None) -> None:
         # list of players for this game
         self.player_proxies = []
 
@@ -64,7 +64,7 @@ class HanabiGame:
         self.red_tokens = 3
 
         # cards deck
-        self.deck = Deck()
+        self.deck = deck or Deck()
 
         self.game_started = False
 
@@ -142,7 +142,10 @@ class HanabiGame:
         illegal = False
 
         # iterate over players and hands until the game is over
-        for proxy, hand in itertools.cycle(zip(self.player_proxies, self.hands)):
+        i = 0
+        stop = 2
+        for proxy, hand in itertools.chain.from_iterable([zip(self.player_proxies, self.hands) for _ in range(3)]):
+            i = i + 1
             if self.red_tokens < 0 or self.deck.is_empty():
                 break
 
@@ -167,6 +170,7 @@ class HanabiGame:
                             p.reward_player(REWARDS["PLAYED_CORRECT_CARD"])
                         else:
                             p.reward_player(REWARDS["PLAYED_CORRECT_CARD"] * .5)
+                    # break
                 else:
                     # move the card in the discard pile and remove one red token
                     self.discard_pile.append(card)
@@ -222,11 +226,14 @@ class HanabiGame:
 
             # self.__print_state()
 
+            if i == stop:
+                break
+
         for p in self.player_proxies:
             # p.reward_player(self.score())
             if isinstance(p.get_player(), DRLAgent):
-                if self.score() == 0:
-                    p.reward_player(-1)
+                # if self.score() == 0:
+                #     p.reward_player(-1)
                 p.get_player().train()
         
         print("Final score: ", self.score() )
@@ -298,17 +305,18 @@ class PlayerGameProxy:
 if __name__ == "__main__":
     const_player = DRLAgent("Martha", n_players=2, training=True)
 
-    players = [DRLAgent(f"Player-{i}", n_players=2) for i in range(1)]
+    # players = [DRLAgent(f"Player-{i}", n_players=2) for i in range(1)]
     # players = [ConstantAgent("Jeremy")]
+    players = [NaiveAgent("Idun")]
     best_score = 0
 
     scores = []
     for i in range(100_000):
-        game = HanabiGame()
+        game = HanabiGame(deck=PredictableDeck())
         print(f"#{i}")
 
         game_players = [const_player, *random.sample(players, 1)]
-        shuffle(game_players)
+        # shuffle(game_players)
         for p in game_players:
             #p.training = (i // 50) % 2 == 0
             if isinstance(p, DRLAgent):

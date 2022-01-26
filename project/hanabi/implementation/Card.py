@@ -91,3 +91,14 @@ class Deck:
 
     def __repr__(self) -> str:
         return self.__str__()
+
+
+class PredictableDeck(Deck):
+    def __init__(self) -> None:
+        self.cards = [
+            Card("Y", 3), Card("R", 2), Card("B", 5), Card("Y", 2), Card("G", 4),
+            Card("W", 1), Card("B", 1), Card("R", 1), Card("G", 1), Card("Y", 1), 
+        ]
+        self.cards = [*self.cards, *[c for c in build_cards_deck() if c not in self.cards]]
+        self.cards = self.cards[::-1]
+

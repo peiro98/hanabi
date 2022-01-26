@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 
 from Hint import ColorHint
 from Move import PlayMove, DiscardMove, HintColorMove, HintValueMove
+from Card import CARD_COLORS, Card
 
 
 class Player(ABC):
@@ -43,6 +44,31 @@ class Player(ABC):
             return HintValueMove(other.name, card.value)
 
         return HintColorMove(other.name, card.color)
+    
+    def get_playable_cards(self, proxy: "PlayerGameProxy"):
+        board = proxy.see_board()
+
+        playable = [Card(c.color, c.value + 1) for c in board if c.value < 5]
+        # Card(color, 1) for colors that are not on the board yet
+        playable += [Card(color, 1) for color in CARD_COLORS if not any(c.color == color for c in board)]
+        return playable
+
+    def hint_playable(self, proxy: "PlayerGameProxy"):
+        board = proxy.see_board()
+        # next playable card for each color
+        playable = self.get_playable_cards(proxy)
+
+        for other in proxy.get_other_players():
+            hand = proxy.see_hand(other)
+
+            card, hints = next(((c, hints) for c, hints in hand if c in playable and len(hints) < 2), (None, None))
+            if card:
+                if any(isinstance(hint, ColorHint) for hint in hints):
+                    return HintValueMove(other.name, card.value)
+                else:
+                    return HintColorMove(other.name, card.color)
+        
+        return None
 
     def __eq__(self, __o: object) -> bool:
         # player with the same name are the same player
@@ -116,15 +142,20 @@ class NaiveAgent(Player):
     def step(self, proxy: "PlayerGameProxy"):
         my_hand = proxy.see_hand(self)
 
+        playable_cards = self.get_playable_cards(proxy)
+
         # find the index of a card whose color and value are both kwnown
         card_index = next(
-            (i for i, (card, _) in enumerate(my_hand) if card.color and card.value),
+            (i for i, (card, _) in enumerate(my_hand) 
+            if (card.color and card.value) or (card.value == 1 and all(c.value == 1 for c in playable_cards))),
             None,
         )
         if card_index is not None:
             return PlayMove(card_index)
 
         if proxy.count_blue_tokens():
-            return self.give_random_hint(proxy)
+            return self.hint_playable(proxy) or self.give_random_hint(proxy)
+            # return self.give_random_hint(proxy)
 
         return DiscardMove(random.randint(0, len(my_hand) - 1))
+

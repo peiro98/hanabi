@@ -48,6 +48,7 @@ from Move import (
 #   discard 5               -
 # ]
 
+eps = 1.0
 
 class StateEncoder:
     """Encode the game state in torch tensors"""
@@ -119,7 +120,7 @@ class ActionDecoder:
     def get_action(self):
         _, action_idx = torch.max(self.Q, 0)
 
-        if random.random() < 0.5:
+        if random.random() < eps:
             c = random.choice(range(3))
             if c == 0:
                 # random move
@@ -147,7 +148,6 @@ class ActionDecoder:
 
         idx = idx - 5 * (self.n_players - 1)
         return DiscardMove(idx), action_idx
-
 
 class Net(nn.Module):
     def __init__(self, n_players=5):
@@ -215,11 +215,6 @@ class DRLAgent(TrainablePlayer):
 
         self.model.eval()
 
-    def clear_illegal_moves(self, Q, proxy):
-        if proxy.count_blue_tokens() == 0:
-            Q[5:5 + 10 * (self.n_players - 1)] = 0
-        return Q
-
     def __get_encoded_state(self, proxy: "PlayerGameProxy"):
         players_state = [proxy.see_hand(p) for p in [proxy.get_player(), *proxy.get_other_players()]]
         board_state = proxy.see_board()
@@ -233,14 +228,15 @@ class DRLAgent(TrainablePlayer):
             proxy.count_red_tokens(),
         )
 
-    def step(self, proxy: "PlayerGameProxy", eps=1.0):
+    def step(self, proxy: "PlayerGameProxy"):
         encoded_state = self.__get_encoded_state(proxy)
+        global eps
+        eps = eps * 0.995
 
         Q, _ = self.model(*encoded_state.get_state())
-        Q = self.clear_illegal_moves(Q, proxy)
 
         action = None
-        while action is None or (isinstance(action, HintMove) and (action.player == 0 or proxy.count_blue_tokens() <= 0)):
+        while action is None or (isinstance(action, HintMove) and proxy.count_blue_tokens() <= 0):
             action, action_idx = ActionDecoder(self.n_players, Q, eps).get_action()
 
         if isinstance(action, HintMove):
@@ -316,4 +312,4 @@ class DRLAgent(TrainablePlayer):
         exp_without_reward = [(s, a, r, ns) for s, a, r, ns in self.experience if r == 0]
         # self.experience = list(random.sample(self.experience, min(256, len(self.experience))))
         self.experience = list(random.sample(exp_with_reward, min(4096, len(exp_with_reward))))
-        # self.experience += list(random.sample(exp_without_reward, min(1024, len(exp_without_reward))))
+        self.experience += list(random.sample(exp_without_reward, min(1024, len(exp_without_reward))))
