@@ -1,5 +1,6 @@
 from cmath import exp
 import itertools
+from multiprocessing.sharedctypes import Value
 from operator import itemgetter
 from os import stat
 from typing import List, Set, Tuple
@@ -50,8 +51,6 @@ from Move import (
 #   ...                     |=> 5
 #   discard 5               -
 # ]
-
-eps = 0.9999
 
 
 class StateEncoder:
@@ -123,42 +122,77 @@ class StateEncoder:
 
 
 class ActionDecoder:
-    def __init__(self, n_players, Q: torch.tensor, eps=1.0) -> None:
-        self.n_players = n_players
+    """Decode an action from a Q array"""
+
+    def __init__(self, Q: torch.tensor) -> None:
+        """
+        Initialize the action decoder.
+
+        Parameters:
+        -----------
+        Q: torch.tensor
+            output of the Q-learning model
+        """
         self.Q = Q
-        self.eps = eps
 
-    def get_action(self):
-        _, action_idx = torch.max(self.Q, 0)
+    def size(self):
+        return self.Q.size()[0]
 
-        if random.random() < eps:
-            c = random.choice(range(3))
-            if c == 0:
-                # random move
-                action_idx = random.choice(range(5))
-            elif c == 1:
-                # random hint
-                action_idx = random.randint(5, 5 + 10 * (self.n_players - 1) - 1)
-            else:
-                action_idx = random.randint(5 + 10 * (self.n_players - 1) - 1, 5 + 10 * (self.n_players - 1) - 1 + 5)
-        # if random.random() < self.eps:
-        #     idx = random.randint(0, int(self.outputs.size()[0]) - 1)
+    def pick_action(self, mode="prob"):
+        """Pick an action
 
-        idx = int(action_idx)
+        Parameters:
+        -----------
+        mode: str
+            selection mode for the action ("prob" or "max")
+        """
+        if mode not in ["prob", "max"]:
+            raise ValueError("Valid values for the mode parameter: ['max', 'prob']")
+
+        if mode == "max":
+            _, action_idx = torch.max(self.Q, 0)
+        else:
+            # transform Q values into probabilities
+            probs = torch.clone(self.Q)
+            # do not consider values below 1e-5
+            probs[probs < 1e-5] = 0.0
+            probs[probs > 0] = F.softmax(probs[probs > 0])
+            # pick an action from the categorical distribution
+            action_idx = torch.distributions.Categorical(probs).sample()
+
+        return self.get(action_idx), action_idx
+
+    def pick_random(self):
+        n_players = (self.size() - 10) // 5
+
+        c = random.choice(range(3))
+        if c == 0:
+            # random move
+            action_idx = random.choice(range(5))
+        elif c == 1:
+            # random hint
+            action_idx = random.randint(5, 5 + 10 * (n_players - 1) - 1)
+        else:
+            action_idx = random.randint(5 + 10 * (n_players - 1) - 1, 5 + 10 * (n_players - 1) - 1 + 5)
+
+        return self.get(action_idx), action_idx
+
+    def get(self, idx):
+        n_players = (self.size() - 10) // 5
 
         if idx < 5:
-            return PlayMove(idx), action_idx
+            return PlayMove(idx)
 
         idx = idx - 5
-        if idx < 5 * (self.n_players - 1):
-            return HintValueMove(idx // 5, CARD_VALUES[idx % 5]), action_idx
+        if idx < 5 * (n_players - 1):
+            return HintValueMove(idx // 5, CARD_VALUES[idx % 5])
 
-        idx = idx - 5 * (self.n_players - 1)
-        if idx < 5 * (self.n_players - 1):
-            return HintColorMove(idx // 5, CARD_COLORS[idx % 5]), action_idx
+        idx = idx - 5 * (n_players - 1)
+        if idx < 5 * (n_players - 1):
+            return HintColorMove(idx // 5, CARD_COLORS[idx % 5])
 
-        idx = idx - 5 * (self.n_players - 1)
-        return DiscardMove(idx), action_idx
+        idx = idx - 5 * (n_players - 1)
+        return DiscardMove(idx)
 
 
 class Net(nn.Module):
@@ -189,7 +223,14 @@ class Net(nn.Module):
 
 class DRLAgent(TrainablePlayer):
     def __init__(
-        self, name: str, n_players=5, discount=0.95, training=True, target_model_refresh_interval=500
+        self,
+        name: str,
+        n_players=5,
+        discount=0.95,
+        training=True,
+        eps=1.0,
+        eps_step=0.999,
+        target_model_refresh_interval=500,
     ) -> None:
         super().__init__(name)
         self.n_players = n_players
@@ -205,6 +246,9 @@ class DRLAgent(TrainablePlayer):
         self.zero_experience = []
         self.target_model_refresh_interval = target_model_refresh_interval
 
+        self.eps = eps
+        self.eps_step = eps_step
+
         self.optimizer = torch.optim.Adam(self.model.parameters())
 
     def prepare(self):
@@ -214,16 +258,18 @@ class DRLAgent(TrainablePlayer):
         """
         self.states = []
         self.rewards = []
-        self.Qs = []
         self.actions = []
 
         self.model.eval()
+
+        self.eps = self.eps * self.eps_step
 
         # periodically the target model is refreshed
         if self.played_games % self.target_model_refresh_interval:
             self.frozen_model.load_state_dict(self.model.state_dict())
 
-    def __get_encoded_state(self, proxy: "PlayerGameProxy"):
+    def __get_encoded_state(self, proxy: "PlayerGameProxy") -> StateEncoder:
+        """Encode the current game state"""
         players_state = [proxy.see_hand(p) for p in [proxy.get_player(), *proxy.get_other_players()]]
         board_state = proxy.see_board()
         discard_pile_state = proxy.see_discard_pile()
@@ -238,11 +284,11 @@ class DRLAgent(TrainablePlayer):
 
     def step(self, proxy: "PlayerGameProxy"):
         encoded_state = self.__get_encoded_state(proxy)
-        global eps
-        eps = eps * 0.9999
 
+        # compute the output of the model
         Q, _ = self.model(*encoded_state.get_state())
-        Q = Q.squeeze()
+        # create a decoder that is used to convert Q into actual actions
+        decoder = ActionDecoder(Q.squeeze())
 
         action = None
         while (
@@ -252,25 +298,40 @@ class DRLAgent(TrainablePlayer):
             # do not play or discard if this is the game's first turn
             or ((isinstance(action, PlayMove) or isinstance(action, DiscardMove)) and proxy.get_turn_index() == 0)
         ):
-            action, action_idx = ActionDecoder(self.n_players, Q, eps).get_action()
+            # generate a random number in [0, 1] to decide whether the player
+            # is going to act greedily or not
+            if random.random() < self.eps:
+                # act greedily
+                action, action_idx = decoder.pick_random()
+            else:
+                # pick the best action
+                # (mode='prob' appears to perform badly and/or the training is very slow)
+                action, action_idx = decoder.pick_action(mode="max")
 
+        # hint actions refer to players using their indices
         if isinstance(action, HintMove):
+            # convert indices to names
             action.player = proxy.get_other_players()[action.player].name
 
-        # log the state
-        # self.states.append(deepcopy(encoded_state))
+        # log state, reward and selected action
         self.states.append(deepcopy(encoded_state))
-        self.Qs.append(Q)
         self.rewards.append(0)
         self.actions.append(action_idx)
 
         return action
 
     def receive_reward(self, reward: float):
+        """Reward the last performed action during this game
+
+        Parameters:
+        -----------
+        reward: float
+            the reward
+        """
         self.rewards[-1] += reward
 
     def train(self):
-        if len(self.Qs) == 0 or not self.training:
+        if len(self.states) == 0 or not self.training:
             return
 
         # state, action, reward, new_state

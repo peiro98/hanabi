@@ -102,3 +102,6 @@ class PredictableDeck(Deck):
         self.cards = [*self.cards, *[c for c in build_cards_deck() if c not in self.cards]]
         self.cards = self.cards[::-1]
 
+
+def eps_predictable_deck_builder(initial_prob=0.999, step=0.999):
+    pass
