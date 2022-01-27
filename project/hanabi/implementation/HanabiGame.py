@@ -4,7 +4,7 @@ import itertools
 from functools import reduce
 from operator import add
 
-from numpy import isin
+import torch
 from Hint import ColorHint, Hint, ValueHint
 
 from Card import Card, Deck, PredictableDeck
@@ -351,3 +351,12 @@ if __name__ == "__main__":
         if i:
             scores = scores[-500:]
             print(f"Mean: {statistics.mean(scores)}")
+
+    norms = []
+    for p1 in players:
+        for p2 in players:
+            p1_params = torch.cat([p.flatten() for p in p1.frozen_model.state_dict().values()])
+            p2_params = torch.cat([p.flatten() for p in p2.frozen_model.state_dict().values()])
+            norms.append(torch.linalg.norm(p1_params - p2_params, 2))
+
+    print(norms)

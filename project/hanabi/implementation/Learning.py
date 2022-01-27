@@ -230,6 +230,8 @@ class DRLAgent(TrainablePlayer):
         training=True,
         eps=1.0,
         eps_step=0.999,
+        finetune_eps=0.2,
+        finetune_eps_step=0.9999,
         target_model_refresh_interval=500,
     ) -> None:
         super().__init__(name)
@@ -248,6 +250,8 @@ class DRLAgent(TrainablePlayer):
 
         self.eps = eps
         self.eps_step = eps_step
+        self.finetune_eps = finetune_eps
+        self.finetune_eps_step = finetune_eps_step
         self.min_eps = 0.005
 
         self.optimizer = torch.optim.Adam(self.model.parameters())
@@ -269,12 +273,12 @@ class DRLAgent(TrainablePlayer):
         if self.played_games % self.target_model_refresh_interval:
             self.frozen_model.load_state_dict(self.model.state_dict())
 
-    def finetune(self, eps=0.1):
-        self.eps_step = self.eps_step * 0.1
-        self.eps = eps
+    def finetune(self):
+        self.eps_step = self.finetune_eps_step
+        self.eps = self.finetune_eps
 
         for g in self.optimizer.param_groups:
-            g['lr'] *= 0.1
+            g['lr'] *= 0.01
 
     def __get_encoded_state(self, proxy: "PlayerGameProxy") -> StateEncoder:
         """Encode the current game state"""
