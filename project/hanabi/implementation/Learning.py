@@ -248,6 +248,7 @@ class DRLAgent(TrainablePlayer):
 
         self.eps = eps
         self.eps_step = eps_step
+        self.min_eps = 0.005
 
         self.optimizer = torch.optim.Adam(self.model.parameters())
 
@@ -262,11 +263,18 @@ class DRLAgent(TrainablePlayer):
 
         self.model.eval()
 
-        self.eps = self.eps * self.eps_step
+        self.eps = max(self.min_eps, self.eps * self.eps_step)
 
         # periodically the target model is refreshed
         if self.played_games % self.target_model_refresh_interval:
             self.frozen_model.load_state_dict(self.model.state_dict())
+
+    def finetune(self, eps=0.1):
+        self.eps_step = self.eps_step * 0.1
+        self.eps = eps
+
+        for g in self.optimizer.param_groups:
+            g['lr'] *= 0.1
 
     def __get_encoded_state(self, proxy: "PlayerGameProxy") -> StateEncoder:
         """Encode the current game state"""
@@ -291,6 +299,7 @@ class DRLAgent(TrainablePlayer):
         decoder = ActionDecoder(Q.squeeze())
 
         action = None
+        is_random_action = random.random() < self.eps
         while (
             action is None
             # hints are not available
@@ -300,7 +309,7 @@ class DRLAgent(TrainablePlayer):
         ):
             # generate a random number in [0, 1] to decide whether the player
             # is going to act greedily or not
-            if random.random() < self.eps:
+            if is_random_action or action is not None:
                 # act greedily
                 action, action_idx = decoder.pick_random()
             else:
@@ -390,15 +399,17 @@ class DRLAgent(TrainablePlayer):
         )
 
         loss = F.mse_loss(outputs, target_Q)
+        if torch.isnan(loss):
+            exit(1)
 
         loss.backward()
         self.optimizer.step()
         # self.scheduler.step()
 
-        self.positive_experience = list(
-            random.sample(self.positive_experience, min(4096, len(self.positive_experience)))
-        )
-        # self.positive_experience = exp_with_reward[-8192:]
+        # self.positive_experience = list(
+        #     random.sample(self.positive_experience, min(8192, len(self.positive_experience)))
+        # )
+        self.positive_experience = self.positive_experience[-8192:]
         self.zero_experience += list(random.sample(self.zero_experience, min(4096, len(self.zero_experience))))
 
         # increment the number of played games

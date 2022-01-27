@@ -1,11 +1,11 @@
-from ast import Constant
 import statistics
 from typing import Optional, List, Tuple
 import itertools
 from functools import reduce
 from operator import add
+
+from numpy import isin
 from Hint import ColorHint, Hint, ValueHint
-from random import shuffle
 
 from Card import Card, Deck, PredictableDeck
 from Move import DiscardMove, HintColorMove, HintMove, PlayMove
@@ -210,6 +210,7 @@ class HanabiGame:
                 other = self.__find_player_by_name(move.player)
 
                 if self.blue_tokens <= 0 or proxy.get_player() == other:
+                    raise ValueError("aaa")
                     proxy.reward_player(REWARDS["ILLEGAL"])
 
                 self.__log(f"Player {proxy.get_player()} hints {move}")
@@ -314,9 +315,20 @@ if __name__ == "__main__":
 
     best_score = 0
 
+    pred_deck_prob = 1.000
+
     scores = []
     for i in range(100_000):
-        game = HanabiGame(deck=PredictableDeck(), verbose=False)
+        if i > 15_000:
+            deck = PredictableDeck() if random.random() < pred_deck_prob else Deck()
+            pred_deck_prob = pred_deck_prob * 0.9999
+        else:
+            deck = PredictableDeck()
+
+        if i == 15_000:
+            [p.finetune() for p in players if isinstance(p, DRLAgent)]
+        
+        game = HanabiGame(deck, verbose=False)
             
         print(f"Game #{i}")
 

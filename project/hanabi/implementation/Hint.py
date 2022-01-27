@@ -1,6 +1,3 @@
-from typing import Set, NewType
-
-
 class Hint:
     """An hint
 
@@ -53,5 +50,3 @@ class ValueHint(Hint):
     def __hash__(self) -> int:
         return super().__hash__()
 
-
-Hints = NewType("NewType", Set[Hint])
