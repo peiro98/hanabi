@@ -53,6 +53,7 @@ from Move import (
 
 eps = 0.9999
 
+
 class StateEncoder:
     """Encode the game state in torch tensors"""
 
@@ -77,7 +78,7 @@ class StateEncoder:
                 if card.color and card.value:
                     color_idx = CARD_COLORS.index(card.color)
                     self.players_state[100 * player_idx + 20 * card_idx + color_idx] = 1
-                
+
                 if card.value:
                     value_idx = CARD_VALUES.index(card.value)
                     self.players_state[100 * player_idx + 20 * card_idx + 5 + value_idx] = 1
@@ -159,14 +160,15 @@ class ActionDecoder:
         idx = idx - 5 * (self.n_players - 1)
         return DiscardMove(idx), action_idx
 
+
 class Net(nn.Module):
     def __init__(self, n_players=5):
         super(Net, self).__init__()
 
-        players_input_size = 100 * n_players # [40, 60, 80, 100]
+        players_input_size = 100 * n_players  # [40, 60, 80, 100]
         output_size = 10 + 10 * (n_players - 1)
 
-        input_size = players_input_size + 25 + 25 + 2 # player size + board + discard pile
+        input_size = players_input_size + 25 + 25 + 2  # player size + board + discard pile
         self.fc1 = nn.Linear(input_size, input_size)
         self.fc2 = nn.Linear(input_size, input_size)
         self.fc3 = nn.Linear(input_size, output_size * 2)
@@ -186,10 +188,12 @@ class Net(nn.Module):
 
 
 class DRLAgent(TrainablePlayer):
-    def __init__(self, name: str, n_players=5, discount=0.95, training=True, target_model_refresh_interval=500) -> None:
+    def __init__(
+        self, name: str, n_players=5, discount=0.95, training=True, target_model_refresh_interval=500
+    ) -> None:
         super().__init__(name)
         self.n_players = n_players
-        
+
         self.model = Net(n_players)
         self.frozen_model = Net(n_players)
 
@@ -203,10 +207,9 @@ class DRLAgent(TrainablePlayer):
 
         self.optimizer = torch.optim.Adam(self.model.parameters())
 
-
     def prepare(self):
         """Reset the state of the player
-        
+
         This method must be called before starting a new game.
         """
         self.states = []
@@ -219,7 +222,6 @@ class DRLAgent(TrainablePlayer):
         # periodically the target model is refreshed
         if self.played_games % self.target_model_refresh_interval:
             self.frozen_model.load_state_dict(self.model.state_dict())
-
 
     def __get_encoded_state(self, proxy: "PlayerGameProxy"):
         players_state = [proxy.see_hand(p) for p in [proxy.get_player(), *proxy.get_other_players()]]
@@ -243,7 +245,13 @@ class DRLAgent(TrainablePlayer):
         Q = Q.squeeze()
 
         action = None
-        while action is None or (isinstance(action, HintMove) and proxy.count_blue_tokens() <= 0):
+        while (
+            action is None
+            # hints are not available
+            or (isinstance(action, HintMove) and proxy.count_blue_tokens() <= 0)
+            # do not play or discard if this is the game's first turn
+            or ((isinstance(action, PlayMove) or isinstance(action, DiscardMove)) and proxy.get_turn_index() == 0)
+        ):
             action, action_idx = ActionDecoder(self.n_players, Q, eps).get_action()
 
         if isinstance(action, HintMove):
@@ -281,7 +289,10 @@ class DRLAgent(TrainablePlayer):
         target_Q = []
         actions_idxs = []
 
-        batch = itertools.chain(random.sample(self.positive_experience, bs_positive // 2), random.sample(self.zero_experience, bs_zero // 2))
+        batch = itertools.chain(
+            random.sample(self.positive_experience, bs_positive // 2),
+            random.sample(self.zero_experience, bs_zero // 2),
+        )
         for state, action, reward, next_state in batch:
             if next_state is not None:
                 # compute the Q value for the next state
@@ -310,18 +321,22 @@ class DRLAgent(TrainablePlayer):
         target_Q = torch.tensor(target_Q)
         target_Q.requires_grad = False
 
-        outputs = torch.cat([
-            self.model(*state.get_state())[0].squeeze()[action].unsqueeze(0)
-            for state, action in zip(input_states, actions_idxs)
-        ])
-        
+        outputs = torch.cat(
+            [
+                self.model(*state.get_state())[0].squeeze()[action].unsqueeze(0)
+                for state, action in zip(input_states, actions_idxs)
+            ]
+        )
+
         loss = F.mse_loss(outputs, target_Q)
 
         loss.backward()
         self.optimizer.step()
-            # self.scheduler.step()
+        # self.scheduler.step()
 
-        self.positive_experience = list(random.sample(self.positive_experience, min(4096, len(self.positive_experience))))
+        self.positive_experience = list(
+            random.sample(self.positive_experience, min(4096, len(self.positive_experience)))
+        )
         # self.positive_experience = exp_with_reward[-8192:]
         self.zero_experience += list(random.sample(self.zero_experience, min(4096, len(self.zero_experience))))
 

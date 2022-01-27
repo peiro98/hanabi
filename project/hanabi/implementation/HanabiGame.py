@@ -67,6 +67,7 @@ class HanabiGame:
         self.deck = deck or Deck()
 
         self.game_started = False
+        self.iter_index = 0
         self.verbose = verbose
 
     def register_player(self, player: "Player"):
@@ -141,7 +142,7 @@ class HanabiGame:
         self.__generate_hands()
 
         # iterate over players and hands until the game is over
-        for iter_index, (proxy, hand) in enumerate(itertools.cycle(zip(self.player_proxies, self.hands)), 1):
+        for proxy, hand in itertools.cycle(zip(self.player_proxies, self.hands)):
             if self.red_tokens < 0 or self.deck.is_empty():
                 break
 
@@ -220,7 +221,8 @@ class HanabiGame:
 
                 self.blue_tokens -= 1
 
-            if early_stop_at and iter_index == (early_stop_at * len(self.player_proxies)):
+            self.iter_index += 1
+            if early_stop_at and self.iter_index == (early_stop_at * len(self.player_proxies)):
                 break
 
         for p in self.player_proxies:
@@ -231,6 +233,9 @@ class HanabiGame:
                 p.get_player().train()
         
         self.__log(f"Final score: {self.score()}")
+    
+    def get_turn_index(self):
+        return self.iter_index
 
     def __log(self, str):
         """Log something (if verbose is set)"""
@@ -299,6 +304,9 @@ class PlayerGameProxy:
     def reward_player(self, reward):
         if isinstance(self.player, TrainablePlayer) and len(self.player.rewards) > 0:
             self.player.receive_reward(reward)
+
+    def get_turn_index(self):
+        return self.game.get_turn_index()
 
 
 if __name__ == "__main__":
