@@ -47,7 +47,7 @@ REWARDS = {
 class HanabiGame:
     """An Hanabi game."""
 
-    def __init__(self, deck=None) -> None:
+    def __init__(self, deck=None, *, verbose=True) -> None:
         # list of players for this game
         self.player_proxies = []
 
@@ -67,6 +67,7 @@ class HanabiGame:
         self.deck = deck or Deck()
 
         self.game_started = False
+        self.verbose = verbose
 
     def register_player(self, player: "Player"):
         if self.game_started:
@@ -139,8 +140,6 @@ class HanabiGame:
     def start(self, *, early_stop_at=None):
         self.__generate_hands()
 
-        illegal = False
-
         # iterate over players and hands until the game is over
         for iter_index, (proxy, hand) in enumerate(itertools.cycle(zip(self.player_proxies, self.hands)), 1):
             if self.red_tokens < 0 or self.deck.is_empty():
@@ -157,7 +156,7 @@ class HanabiGame:
                 card, hints = hand.pop(move.index)
 
                 # TODO: replace with logging function
-                print(f"Player {proxy.get_player()} plays {card}")
+                self.__log(f"Player {proxy.get_player()} plays {card}")
 
                 if self.__is_playable(card):
                     # play the card and grant one blue token
@@ -167,7 +166,9 @@ class HanabiGame:
                             p.reward_player(REWARDS["PLAYED_CORRECT_CARD"])
                         else:
                             p.reward_player(REWARDS["PLAYED_CORRECT_CARD"] * .5)
-                    # break
+                    
+                    if card.value == 5:
+                        self.blue_tokens += 1
                 else:
                     # move the card in the discard pile and remove one red token
                     self.discard_pile.append(card)
@@ -185,7 +186,7 @@ class HanabiGame:
                 # extract the card to discard
                 card, hints = hand.pop(move.index)
 
-                print(f"Player {proxy.get_player()} discards {card}")
+                self.__log(f"Player {proxy.get_player()} discards {card}")
 
                 # discard the card and grant one blue token
                 self.discard_pile.append(card)
@@ -209,10 +210,8 @@ class HanabiGame:
 
                 if self.blue_tokens <= 0 or proxy.get_player() == other:
                     proxy.reward_player(REWARDS["ILLEGAL"])
-                    # illegal = True
-                    # break
 
-                print(f"Player {proxy.get_player()} hints {move}")
+                self.__log(f"Player {proxy.get_player()} hints {move}")
 
                 if isinstance(move, HintColorMove):
                     self.__apply_hint(other, ColorHint(move.color))
@@ -220,8 +219,6 @@ class HanabiGame:
                     self.__apply_hint(other, ValueHint(move.value))
 
                 self.blue_tokens -= 1
-
-            # self.__print_state()
 
             if early_stop_at and iter_index == (early_stop_at * len(self.player_proxies)):
                 break
@@ -233,7 +230,12 @@ class HanabiGame:
                 #     p.reward_player(-1)
                 p.get_player().train()
         
-        print("Final score: ", self.score() )
+        self.__log(f"Final score: {self.score()}")
+
+    def __log(self, str):
+        """Log something (if verbose is set)"""
+        if self.verbose:
+            print(str)
 
     def __print_state(self):
         print(f"Blue tokens: {self.blue_tokens:2d}.")
@@ -306,7 +308,7 @@ if __name__ == "__main__":
 
     scores = []
     for i in range(100_000):
-        game = HanabiGame(deck=PredictableDeck())
+        game = HanabiGame(deck=PredictableDeck(), verbose=False)
             
         print(f"Game #{i}")
 
