@@ -186,7 +186,7 @@ class Net(nn.Module):
 
 
 class DRLAgent(TrainablePlayer):
-    def __init__(self, name: str, n_players=5, discount=0.95, training=True) -> None:
+    def __init__(self, name: str, n_players=5, discount=0.95, training=True, target_model_refresh_interval=500) -> None:
         super().__init__(name)
         self.n_players = n_players
         
@@ -196,10 +196,13 @@ class DRLAgent(TrainablePlayer):
         self.discount = discount
         self.training = training
 
+        self.played_games = 0
         self.positive_experience = []
         self.zero_experience = []
+        self.target_model_refresh_interval = target_model_refresh_interval
 
         self.optimizer = torch.optim.Adam(self.model.parameters())
+
 
     def prepare(self):
         """Reset the state of the player
@@ -213,8 +216,10 @@ class DRLAgent(TrainablePlayer):
 
         self.model.eval()
 
-    def refresh_frozen_model(self):
-        self.frozen_model.load_state_dict(self.model.state_dict())
+        # periodically the target model is refreshed
+        if self.played_games % self.target_model_refresh_interval:
+            self.frozen_model.load_state_dict(self.model.state_dict())
+
 
     def __get_encoded_state(self, proxy: "PlayerGameProxy"):
         players_state = [proxy.see_hand(p) for p in [proxy.get_player(), *proxy.get_other_players()]]
@@ -322,3 +327,6 @@ class DRLAgent(TrainablePlayer):
         self.positive_experience = list(random.sample(self.positive_experience, min(4096, len(self.positive_experience))))
         # self.positive_experience = exp_with_reward[-8192:]
         self.zero_experience += list(random.sample(self.zero_experience, min(4096, len(self.zero_experience))))
+
+        # increment the number of played games
+        self.played_games += 1

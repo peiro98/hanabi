@@ -300,23 +300,19 @@ class PlayerGameProxy:
 
 
 if __name__ == "__main__":
-    const_player = DRLAgent("Martha", n_players=2, training=True, discount=0.5)
+    players = [DRLAgent(f"Player-{i}", n_players=2, training=True, discount=0.25) for i in range(5)]
 
-    players = [DRLAgent(f"Player-{i}", n_players=2, training=True, discount=0.5) for i in range(1)]
-    # players = [ConstantAgent("Jeremy")]
-    # players = [NaiveAgent("Idun")]
     best_score = 0
 
     scores = []
     for i in range(100_000):
         game = HanabiGame(deck=PredictableDeck())
-        print(f"#{i}")
+            
+        print(f"Game #{i}")
 
-        if i % 500 == 0:
-            const_player.refresh_frozen_model()
-
-        game_players = [const_player, *random.sample(players, 1)]
+        game_players = random.sample(players, 2)
         # shuffle(game_players)
+
         for p in game_players:
             #p.training = (i // 50) % 2 == 0
             if isinstance(p, DRLAgent):
