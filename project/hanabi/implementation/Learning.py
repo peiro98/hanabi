@@ -199,8 +199,7 @@ class DRLAgent(TrainablePlayer):
         self.positive_experience = []
         self.zero_experience = []
 
-        self.optimizer = torch.optim.SGD(self.model.parameters(), momentum=0.9, lr=.1, weight_decay=1e-3)
-        # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 100, 1)
+        self.optimizer = torch.optim.Adam(self.model.parameters())
 
     def prepare(self):
         """Reset the state of the player
