@@ -351,8 +351,8 @@ class DRLAgent(TrainablePlayer):
             else:
                 self.zero_experience.append(SARS)
 
-        bs_positive = min(32, len(self.positive_experience))
-        bs_zero = min(32, len(self.zero_experience))
+        bs_positive = min(128, len(self.positive_experience))
+        bs_zero = min(128, len(self.zero_experience))
 
         self.frozen_model.eval()
 
@@ -404,14 +404,15 @@ class DRLAgent(TrainablePlayer):
             exit(1)
 
         loss.backward()
+        print(loss.item())
         self.optimizer.step()
         # self.scheduler.step()
 
         # self.positive_experience = list(
         #     random.sample(self.positive_experience, min(8192, len(self.positive_experience)))
         # )
-        self.positive_experience = self.positive_experience[-8192:]
-        self.zero_experience += list(random.sample(self.zero_experience, min(4096, len(self.zero_experience))))
+        self.positive_experience = self.positive_experience[-(16*1024):]
+        self.zero_experience += self.zero_experience[-(16*1024):]
 
         # increment the number of played games
         self.played_games += 1

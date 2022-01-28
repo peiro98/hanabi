@@ -319,14 +319,14 @@ if __name__ == "__main__":
 
     scores = []
     for i in range(100_000):
-        if i > 15_000:
+        if i > 5_000:
             deck = PredictableDeck() if random.random() < pred_deck_prob else Deck()
             pred_deck_prob = pred_deck_prob * 0.9999
         else:
             deck = PredictableDeck()
 
-        if i == 15_000:
-            [p.finetune() for p in players if isinstance(p, DRLAgent)]
+        # if i == 15_000:
+        #     [p.finetune() for p in players if isinstance(p, DRLAgent)]
         
         game = HanabiGame(deck, verbose=False)
             
