@@ -229,7 +229,7 @@ class DRLAgent(TrainablePlayer):
         eps_step=0.999,
         finetune_eps=0.2,
         finetune_eps_step=0.9999,
-        target_model_refresh_interval=500,
+        target_model_refresh_interval=10
     ) -> None:
         super().__init__(name)
         self.n_players = n_players
@@ -267,7 +267,7 @@ class DRLAgent(TrainablePlayer):
         self.eps = max(self.min_eps, self.eps * self.eps_step)
 
         # periodically the target model is refreshed
-        if self.played_games % self.target_model_refresh_interval:
+        if self.played_games and (self.played_games % self.target_model_refresh_interval) == 0:
             self.frozen_model.load_state_dict(self.model.state_dict())
 
     def finetune(self):
@@ -411,8 +411,8 @@ class DRLAgent(TrainablePlayer):
         # self.positive_experience = list(
         #     random.sample(self.positive_experience, min(8192, len(self.positive_experience)))
         # )
-        self.positive_experience = self.positive_experience[-(16*1024):]
-        self.zero_experience += self.zero_experience[-(16*1024):]
+        self.positive_experience = self.positive_experience[-(8*1024):]
+        self.zero_experience += self.zero_experience[-(8*1024):]
 
         # increment the number of played games
         self.played_games += 1
