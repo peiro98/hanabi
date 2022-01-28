@@ -64,8 +64,6 @@ class StateEncoder:
         blue_tokens: int,
         red_tokens: int,
     ) -> None:
-        n_player = len(players)
-
         # 1. compute the player state
 
         # self.players_state = torch.zeros((n_player * 10, len(CARD_COLORS), len(CARD_VALUES)))
@@ -74,7 +72,7 @@ class StateEncoder:
 
         for player_idx, player_state in enumerate(players):
             for card_idx, (card, hints) in enumerate(player_state):
-                if card.color and card.value:
+                if card.color:
                     color_idx = CARD_COLORS.index(card.color)
                     self.players_state[100 * player_idx + 20 * card_idx + color_idx] = 1
 
@@ -85,20 +83,19 @@ class StateEncoder:
                 for i, hint in enumerate(hints):
                     if isinstance(hint, ColorHint):
                         color_idx = CARD_COLORS.index(hint.color)
-                        self.players_state[100 * player_idx + 20 * card_idx + 10 + i * 5 + color_idx] = 1
+                        self.players_state[100 * player_idx + 20 * card_idx + 10 + color_idx] = 1
                     elif isinstance(hint, ValueHint):
                         value_idx = CARD_VALUES.index(card.value)
-                        self.players_state[100 * player_idx + 20 * card_idx + 10 + i * 5 + value_idx] = 1
+                        self.players_state[100 * player_idx + 20 * card_idx + 10 + 5 + value_idx] = 1
 
         # 2. compute the board state
 
-        self.board_state = torch.zeros((len(CARD_COLORS), len(CARD_VALUES)))
+        self.board_state = torch.zeros((len(CARD_COLORS)))
 
         for card in board:
             color_idx = CARD_COLORS.index(card.color)
-            value_idx = CARD_VALUES.index(card.value)
 
-            self.board_state[color_idx, value_idx] = 1
+            self.board_state[color_idx] = max(self.board_state[color_idx], card.value)
 
         self.board_state = self.board_state.flatten()
 
@@ -110,7 +107,7 @@ class StateEncoder:
             color_idx = CARD_COLORS.index(card.color)
             value_idx = CARD_VALUES.index(card.value)
 
-            self.discard_pile_state[color_idx, value_idx] = 1
+            self.discard_pile_state[color_idx, value_idx] += 1
 
         self.discard_pile_state = self.discard_pile_state.flatten()
 
@@ -202,7 +199,7 @@ class Net(nn.Module):
         players_input_size = 100 * n_players  # [40, 60, 80, 100]
         output_size = 10 + 10 * (n_players - 1)
 
-        input_size = players_input_size + 25 + 25 + 2  # player size + board + discard pile
+        input_size = players_input_size + 5 + 25 + 2  # player size + board + discard pile
         self.fc1 = nn.Linear(input_size, input_size)
         self.fc2 = nn.Linear(input_size, input_size)
         self.fc3 = nn.Linear(input_size, output_size * 2)
