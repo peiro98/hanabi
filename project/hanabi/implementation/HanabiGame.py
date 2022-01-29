@@ -36,7 +36,7 @@ REWARDS = {
     "DISCARDED_CARD_WITH_ONLY_ONE_HINT": 0,
     "DISCARDED_UNPLAYABLE_CARD": 0,
     "DISCARDED_PLAYABLE_CARD": 0,
-    "PLAYED_CORRECT_CARD": 1,
+    "PLAYED_CORRECT_CARD": 2,
     "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": 0,
     "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": 0,
     "HINTED_FULLY_KNOWN_CARD": 0,
@@ -231,12 +231,12 @@ class HanabiGame:
             if isinstance(p.get_player(), DRLAgent):
                 # if self.score() == 0:
                 #     p.reward_player(-1)
-                p.get_player().train()
+                p.get_player().train(p)
         
         self.__log(f"Final score: {self.score()}")
     
     def get_turn_index(self):
-        return self.iter_index
+        return self.iter_index // len(self.player_proxies)
 
     def __log(self, str):
         """Log something (if verbose is set)"""
@@ -311,19 +311,19 @@ class PlayerGameProxy:
 
 
 if __name__ == "__main__":
-    players = [DRLAgent(f"Player-{i}", n_players=2, training=True, discount=0.25) for i in range(5)]
+    players = [DRLAgent(f"Player-{i}", n_players=2, training=True, eps=.9999, eps_step=.99995, discount=0.25) for i in range(5)]
 
     best_score = 0
 
     pred_deck_prob = 1.000
 
     scores = []
-    for i in range(100_000):
-        if i > 5_000:
-            deck = PredictableDeck() if random.random() < pred_deck_prob else Deck()
-            pred_deck_prob = pred_deck_prob * 0.9999
-        else:
-            deck = PredictableDeck()
+    for i in range(50_000):
+        # if i > 5_000:
+        #     deck = PredictableDeck() if random.random() < pred_deck_prob else Deck()
+        #     pred_deck_prob = pred_deck_prob * 0.9999
+        # else:
+        deck = Deck()
 
         # if i == 15_000:
         #     [p.finetune() for p in players if isinstance(p, DRLAgent)]
@@ -341,8 +341,8 @@ if __name__ == "__main__":
                 p.prepare()
             game.register_player(p)
 
-        game.start(early_stop_at=(i // 500 + 1) * 3)
-        # game.start()
+        # game.start(early_stop_at=(i // 500 + 1) * 3)
+        game.start()
 
         #eps = eps * 0.9995
         # print(eps)

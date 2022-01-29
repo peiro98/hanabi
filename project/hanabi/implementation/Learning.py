@@ -1,8 +1,6 @@
 from cmath import exp
+from collections import defaultdict
 import itertools
-from multiprocessing.sharedctypes import Value
-from operator import itemgetter
-from os import stat
 from typing import List, Set, Tuple
 from copy import deepcopy
 import random
@@ -246,6 +244,7 @@ class DRLAgent(TrainablePlayer):
         self.target_model_refresh_interval = target_model_refresh_interval
 
         self.eps = eps
+        self.eps_dict = defaultdict(lambda: self.eps)
         self.eps_step = eps_step
         self.finetune_eps = finetune_eps
         self.finetune_eps_step = finetune_eps_step
@@ -264,7 +263,7 @@ class DRLAgent(TrainablePlayer):
 
         self.model.eval()
 
-        self.eps = max(self.min_eps, self.eps * self.eps_step)
+        # self.eps = max(self.min_eps, self.eps * self.eps_step)
 
         # periodically the target model is refreshed
         if self.played_games and (self.played_games % self.target_model_refresh_interval) == 0:
@@ -300,7 +299,7 @@ class DRLAgent(TrainablePlayer):
         decoder = ActionDecoder(Q.squeeze())
 
         action = None
-        is_random_action = random.random() < self.eps
+        is_random_action = random.random() < self.eps_dict[proxy.get_turn_index()]
         while (
             action is None
             # hints are not available
@@ -340,9 +339,12 @@ class DRLAgent(TrainablePlayer):
         """
         self.rewards[-1] += reward
 
-    def train(self):
+    def train(self, proxy: "PlayerGameProxy"):
         if len(self.states) == 0 or not self.training:
             return
+
+        for i in range(proxy.get_turn_index()):
+            self.eps_dict[i] *= self.eps_step
 
         # state, action, reward, new_state
         for SARS in zip(self.states, self.actions, self.rewards, self.states[1:] + [None]):
