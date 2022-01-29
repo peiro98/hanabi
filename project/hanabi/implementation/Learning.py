@@ -113,7 +113,10 @@ class StateEncoder:
         self.red_tokens = red_tokens
 
     def get_state(self):
-        return self.players_state, self.board_state, self.discard_pile_state, self.blue_tokens, self.red_tokens
+        # return self.players_state, self.board_state, self.discard_pile_state, self.blue_tokens, self.red_tokens
+        state = torch.tensor([self.blue_tokens, self.red_tokens])
+        state = torch.cat([self.players_state, self.board_state, self.discard_pile_state, state])
+        return state.unsqueeze(0)
 
 
 class ActionDecoder:
@@ -198,22 +201,20 @@ class Net(nn.Module):
         output_size = 10 + 10 * (n_players - 1)
 
         input_size = players_input_size + 5 + 25 + 2  # player size + board + discard pile
-        self.fc1 = nn.Linear(input_size, input_size)
-        self.fc2 = nn.Linear(input_size, input_size)
-        self.fc3 = nn.Linear(input_size, output_size * 2)
-        self.fc4 = nn.Linear(output_size * 2, output_size)
+        self.fc1 = nn.Linear(input_size, input_size * 4)
+        self.fc2 = nn.Linear(input_size * 4, input_size * 4)
+        self.fc3 = nn.Linear(input_size * 4, input_size * 2)
+        self.fc4 = nn.Linear(input_size * 2, output_size * 2)
+        self.fc5 = nn.Linear(output_size * 2, output_size)
 
-    def forward(self, players_state, board_state, discard_pile_state, blue_tokens, red_tokens):
-        x = torch.tensor([blue_tokens, red_tokens])
-        x = torch.cat([players_state, board_state, discard_pile_state, x])
-        x = x.unsqueeze(0)
-
+    def forward(self, x):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
-        Q = F.relu(self.fc4(x))
+        x = F.relu(self.fc4(x))
+        Q = F.relu(self.fc5(x))
 
-        return Q, F.softmax(Q, dim=0)
+        return Q
 
 
 class DRLAgent(TrainablePlayer):
@@ -239,8 +240,7 @@ class DRLAgent(TrainablePlayer):
         self.training = training
 
         self.played_games = 0
-        self.positive_experience = []
-        self.zero_experience = []
+        self.experience = []
         self.target_model_refresh_interval = target_model_refresh_interval
 
         self.eps = eps
@@ -248,9 +248,10 @@ class DRLAgent(TrainablePlayer):
         self.eps_step = eps_step
         self.finetune_eps = finetune_eps
         self.finetune_eps_step = finetune_eps_step
-        self.min_eps = 0.005
+        self.min_eps = 0.1
 
-        self.optimizer = torch.optim.Adam(self.model.parameters())
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.00025)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5e4, gamma=0.5)
 
     def prepare(self):
         """Reset the state of the player
@@ -263,20 +264,11 @@ class DRLAgent(TrainablePlayer):
 
         self.model.eval()
 
-        # self.eps = max(self.min_eps, self.eps * self.eps_step)
-
         # periodically the target model is refreshed
         if self.played_games and (self.played_games % self.target_model_refresh_interval) == 0:
             self.frozen_model.load_state_dict(self.model.state_dict())
 
-    def finetune(self):
-        self.eps_step = self.finetune_eps_step
-        self.eps = self.finetune_eps
-
-        for g in self.optimizer.param_groups:
-            g['lr'] *= 0.01
-
-    def __get_encoded_state(self, proxy: "PlayerGameProxy") -> StateEncoder:
+    def __get_encoded_state(self, proxy: "PlayerGameProxy") -> torch.tensor:
         """Encode the current game state"""
         players_state = [proxy.see_hand(p) for p in [proxy.get_player(), *proxy.get_other_players()]]
         board_state = proxy.see_board()
@@ -288,13 +280,13 @@ class DRLAgent(TrainablePlayer):
             discard_pile_state,
             proxy.count_blue_tokens(),
             proxy.count_red_tokens(),
-        )
+        ).get_state()
 
     def step(self, proxy: "PlayerGameProxy"):
         encoded_state = self.__get_encoded_state(proxy)
 
         # compute the output of the model
-        Q, _ = self.model(*encoded_state.get_state())
+        Q = self.model(encoded_state)
         # create a decoder that is used to convert Q into actual actions
         decoder = ActionDecoder(Q.squeeze())
 
@@ -303,9 +295,9 @@ class DRLAgent(TrainablePlayer):
         while (
             action is None
             # hints are not available
-            or (isinstance(action, HintMove) and proxy.count_blue_tokens() <= 0)
+            # or (isinstance(action, HintMove) and proxy.count_blue_tokens() <= 0)
             # do not play or discard if this is the game's first turn
-            or ((isinstance(action, PlayMove) or isinstance(action, DiscardMove)) and proxy.get_turn_index() == 0)
+            # or ((isinstance(action, PlayMove) or isinstance(action, DiscardMove)) and proxy.get_turn_index() == 0)
         ):
             # generate a random number in [0, 1] to decide whether the player
             # is going to act greedily or not
@@ -323,7 +315,7 @@ class DRLAgent(TrainablePlayer):
             action.player = proxy.get_other_players()[action.player].name
 
         # log state, reward and selected action
-        self.states.append(deepcopy(encoded_state))
+        self.states.append(torch.clone(encoded_state))
         self.rewards.append(0)
         self.actions.append(action_idx)
 
@@ -342,79 +334,56 @@ class DRLAgent(TrainablePlayer):
     def train(self, proxy: "PlayerGameProxy"):
         if len(self.states) == 0 or not self.training:
             return
-
-        for i in range(proxy.get_turn_index()):
-            self.eps_dict[i] *= self.eps_step
-
+        
         # state, action, reward, new_state
         for SARS in zip(self.states, self.actions, self.rewards, self.states[1:] + [None]):
-            if SARS[2] > 0:
-                self.positive_experience.append(SARS)
-            else:
-                self.zero_experience.append(SARS)
+            self.experience.append(SARS)
 
-        bs_positive = min(128, len(self.positive_experience))
-        bs_zero = min(128, len(self.zero_experience))
+        if len(self.experience) < 64 * 1024:
+            print(f"not yet ({len(self.experience)})")
+            return
+
+        for i in range(proxy.get_turn_index()):
+            self.eps_dict[i] *= max(self.min_eps, self.eps_dict[i] * self.eps_step)
+
 
         self.frozen_model.eval()
-
-        input_states = []
-        target_Q = []
-        actions_idxs = []
-
-        batch = itertools.chain(
-            random.sample(self.positive_experience, bs_positive // 2),
-            random.sample(self.zero_experience, bs_zero // 2),
-        )
-        for state, action, reward, next_state in batch:
-            if next_state is not None:
-                # compute the Q value for the next state
-                Q, probs = self.frozen_model(*next_state.get_state())
-                # compute the index of the best Q value
-                Q = Q.squeeze()
-                probs = probs.squeeze()
-                _, best_Q_idx = torch.max(probs, 0)
-                # take the best Q value
-                best_Q = Q[best_Q_idx]
-            else:
-                best_Q = torch.tensor(0)
-
-            # compute the target Q
-            # size = 10 + 10 * (self.n_players - 1)
-            # tq = torch.nn.functional.one_hot(torch.tensor(action), num_classes=size)
-            # tq = tq * (reward + self.discount * best_Q)
-            target_Q.append(reward + self.discount * best_Q)
-
-            actions_idxs.append(action)
-            input_states.append(state)
-
         self.model.train()
         self.optimizer.zero_grad()
 
-        target_Q = torch.tensor(target_Q)
-        target_Q.requires_grad = False
+        batch = list(random.sample(self.experience, 32))
 
-        outputs = torch.cat(
-            [
-                self.model(*state.get_state())[0].squeeze()[action].unsqueeze(0)
-                for state, action in zip(input_states, actions_idxs)
-            ]
-        )
+        state_shape = batch[0][0].shape
 
-        loss = F.mse_loss(outputs, target_Q)
+        # compute Q targets using the frozen model
+        non_terminal_selector = torch.tensor([ns is not None for _, _, _, ns in batch], dtype=torch.int)
+
+        next_states = torch.cat([ns if ns is not None else torch.zeros(state_shape) for _, _, _, ns in batch])
+        target_Q = self.frozen_model(next_states)
+
+        states = torch.cat([s for s, _, _, _ in batch])
+        train_Q = self.model(states)
+        # compute the target actions from the train Q
+        _, actions_target = torch.max(train_Q, 1)
+
+        target_Q = torch.sum(target_Q * torch.nn.functional.one_hot(actions_target, num_classes=20), 1)
+        rewards = torch.tensor([r for _, _, r, _ in batch])
+        target_Q = rewards + self.discount * non_terminal_selector * target_Q
+
+        actions = torch.tensor([a for _, a, _, _ in batch])
+        actions_one_hot = torch.nn.functional.one_hot(actions, num_classes=(10 * (self.n_players)))
+        train_Q = torch.sum(train_Q * actions_one_hot, 1)
+
+        loss = F.mse_loss(train_Q, target_Q)
         if torch.isnan(loss):
             exit(1)
 
         loss.backward()
         print(loss.item())
         self.optimizer.step()
-        # self.scheduler.step()
-
-        # self.positive_experience = list(
-        #     random.sample(self.positive_experience, min(8192, len(self.positive_experience)))
-        # )
-        self.positive_experience = self.positive_experience[-(8*1024):]
-        self.zero_experience += self.zero_experience[-(8*1024):]
+        self.scheduler.step()
+        
+        self.experience = self.experience[-(256*1024):]
 
         # increment the number of played games
         self.played_games += 1

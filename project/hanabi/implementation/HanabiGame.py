@@ -17,30 +17,30 @@ HAND_SIZE = 5
 eps = 0.05
 
 REWARDS = {
-    # "PLAYED_WRONG_CARD": -10,
-    # "PLAYED_CARD_WITHOUT_HINTS": -7.5,
-    # "PLAYED_CARD_WITH_ONLY_ONE_HINT": -2.5,
-    # "DISCARDED_CARD_WITHOUT_HINTS": -5,
-    # "DISCARDED_CARD_WITH_ONLY_ONE_HINT": -2,
+    "PLAYED_WRONG_CARD": -1,
+    "PLAYED_CARD_WITHOUT_HINTS": -0.75,
+    "PLAYED_CARD_WITH_ONLY_ONE_HINT": -0.25,
+    "DISCARDED_CARD_WITHOUT_HINTS": -.5,
+    "DISCARDED_CARD_WITH_ONLY_ONE_HINT": -.2,
+    "DISCARDED_UNPLAYABLE_CARD": +.05,
+    "DISCARDED_PLAYABLE_CARD": -0.5,
+    "PLAYED_CORRECT_CARD": +1,
+    "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": +0.2,
+    "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": +0.1,
+    "HINTED_FULLY_KNOWN_CARD": -.75,
+    "ILLEGAL": -1
+    # "PLAYED_WRONG_CARD": 0,
+    # "PLAYED_CARD_WITHOUT_HINTS": 0,
+    # "PLAYED_CARD_WITH_ONLY_ONE_HINT": 0,
+    # "DISCARDED_CARD_WITHOUT_HINTS": 0,
+    # "DISCARDED_CARD_WITH_ONLY_ONE_HINT": 0,
     # "DISCARDED_UNPLAYABLE_CARD": 0,
-    # "DISCARDED_PLAYABLE_CARD": -0.5,
-    # "PLAYED_CORRECT_CARD": 10,
-    # "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": 0.2,
-    # "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": 0.1,
-    # "HINTED_FULLY_KNOWN_CARD": -5,
-    # "ILLEGAL": -25
-    "PLAYED_WRONG_CARD": 0,
-    "PLAYED_CARD_WITHOUT_HINTS": 0,
-    "PLAYED_CARD_WITH_ONLY_ONE_HINT": 0,
-    "DISCARDED_CARD_WITHOUT_HINTS": 0,
-    "DISCARDED_CARD_WITH_ONLY_ONE_HINT": 0,
-    "DISCARDED_UNPLAYABLE_CARD": 0,
-    "DISCARDED_PLAYABLE_CARD": 0,
-    "PLAYED_CORRECT_CARD": 2,
-    "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": 0,
-    "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": 0,
-    "HINTED_FULLY_KNOWN_CARD": 0,
-    "ILLEGAL": 0
+    # "DISCARDED_PLAYABLE_CARD": 0,
+    # "PLAYED_CORRECT_CARD": 2,
+    # "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": 0,
+    # "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": 0,
+    # "HINTED_FULLY_KNOWN_CARD": 0,
+    # "ILLEGAL": 0
 }
 
 
@@ -210,8 +210,9 @@ class HanabiGame:
                 other = self.__find_player_by_name(move.player)
 
                 if self.blue_tokens <= 0 or proxy.get_player() == other:
-                    raise ValueError("aaa")
+                    # raise ValueError("aaa")
                     proxy.reward_player(REWARDS["ILLEGAL"])
+                    break
 
                 self.__log(f"Player {proxy.get_player()} hints {move}")
 
@@ -311,14 +312,24 @@ class PlayerGameProxy:
 
 
 if __name__ == "__main__":
-    players = [DRLAgent(f"Player-{i}", n_players=2, training=True, eps=.9999, eps_step=.99995, discount=0.25) for i in range(5)]
+    players = [
+        DRLAgent(f"Player-{i}", 
+            n_players=2, 
+            training=True, 
+            eps=.9999, 
+            eps_step=.99995, 
+            discount=0, 
+            target_model_refresh_interval=10_000
+        ) 
+        for i in range(2)
+    ]
 
     best_score = 0
 
     pred_deck_prob = 1.000
 
     scores = []
-    for i in range(50_000):
+    for i in range(500_000):
         # if i > 5_000:
         #     deck = PredictableDeck() if random.random() < pred_deck_prob else Deck()
         #     pred_deck_prob = pred_deck_prob * 0.9999
@@ -333,7 +344,7 @@ if __name__ == "__main__":
         print(f"Game #{i}")
 
         game_players = random.sample(players, 2)
-        # shuffle(game_players)
+        random.shuffle(game_players)
 
         for p in game_players:
             #p.training = (i // 50) % 2 == 0
