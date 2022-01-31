@@ -1,5 +1,8 @@
 import random
+import argparse
+import statistics
 from collections import defaultdict
+import json
 
 import numpy as np
 import torch
@@ -11,6 +14,7 @@ from Player import TrainablePlayer
 from actions_decoder import ActionDecoder
 from replay_memory import ReplayMemory, UniformReplayMemory
 from state_encoder import FlatStateEncoder
+from HanabiGame import HanabiGame
 
 
 # See https://stackoverflow.com/a/39757388
@@ -383,3 +387,168 @@ class DRLAgent(TrainablePlayer):
             # values are save as fc1.weight, fc1.bias, fc2.weight, fc2.bias, ...
             for value in self.frozen_model.state_dict().values():
                 np.save(f, value.numpy())
+
+
+def train(args: dict):
+    """Train DQN models"""
+
+    # Generate the training players
+    network_builder = lambda: MLPNetwork(n_players=args["n_players"])
+    players = []
+
+    for i in range(args["n_training_players"]):
+        # Prepare the parameters for the agents
+        player_args = {
+            "discount": args["discount"],
+            "training": True,
+            "initial_eps": args["initial_eps"],
+            "eps_step": args["eps_step"],
+            "minimum_eps": args["minimum_eps"],
+            "turn_dependent_eps": args["turn_dependent_eps"],
+            "batch_size": args["batch_size"],
+            "target_model_refresh_interval": args["target_model_refresh_interval"],
+            "replay_memory": UniformReplayMemory(384 * 1024),
+            "initial_lr": args["initial_lr"],
+            "lr_gamma": args["lr_gamma"],
+            "lr_step": args["lr_step"],
+        }
+
+        players.append(DRLAgent(f"P{i}", network_builder, **player_args))
+
+    # Collect the training scores
+    training_scores = []
+
+    num_iterations = args["n_iterations"]
+    for i in range(num_iterations):
+        # create a new game
+        game = HanabiGame(verbose=False)
+
+        # Register a sample of players to this game
+        for p in random.sample(players, args["n_players"]):
+            if isinstance(p, DRLAgent):
+                p.prepare()
+            game.register_player(p)
+
+        # Start the game
+        game.start()
+
+        training_scores.append(game.score())
+
+        avg_training_score = statistics.mean(training_scores[-500:])
+        print(f"[{i}/{num_iterations}]: moving avg of the last 500 runs is {avg_training_score:.4f}")
+
+    if args["model_save_path"] is not None:
+        filename = args["model_save_path"]
+
+        # Save the model
+        players[0].save_pytorch_model(f"{filename}.pytorch")
+        players[0].save_numpy_model(f"{filename}.numpy")
+
+        with open(f"{filename}.json", "w") as f:
+            f.write(json.dumps(args, indent=4))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Train a Double Deep Q-Learning network to play Hanabi.",
+        add_help=True,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument(
+        "--players",
+        action="store",
+        dest="n_players",
+        type=int,
+        choices=[2, 3, 4, 5],
+        default=2,
+        required=True,
+        help="Number of players",
+    )
+    parser.add_argument(
+        "--training-players",
+        action="store",
+        dest="n_training_players",
+        type=int,
+        default=5,
+        help="Number of training players",
+    )
+    parser.add_argument(
+        "--iterations",
+        action="store",
+        dest="n_iterations",
+        type=int,
+        default=500_000,
+        help="Number of iterations to run. Similar projects suggest to run at least tens of millions of episodes",
+    )
+    parser.add_argument(
+        "--discount",
+        action="store",
+        dest="discount",
+        default=0.25,
+        type=float,
+        help="Discount factor for the Q value of the next state",
+    )
+    parser.add_argument(
+        "--batch-size",
+        action="store",
+        dest="batch_size",
+        default=64,
+        type=int,
+        help="Batch size",
+    )
+    parser.add_argument(
+        "--initial-eps",
+        action="store",
+        dest="initial_eps",
+        default=1.0,
+        type=float,
+        help="Initial epsilon coefficient (probability of selecting a random action)",
+    )
+    parser.add_argument(
+        "--eps-step",
+        action="store",
+        dest="eps_step",
+        default=0.99995,
+        type=float,
+        help="Epsilon coefficient decay step",
+    )
+    parser.add_argument(
+        "--minimum-step",
+        action="store",
+        dest="minimum_eps",
+        default=0.1,
+        type=float,
+        help="Minimum value of the epsilon coefficient",
+    )
+    parser.add_argument(
+        "--turn-dependent-eps",
+        action="store_true",
+        dest="turn_dependent_eps",
+        help="If present, the epsilon coefficient is a function of the turn index",
+    )
+    parser.add_argument(
+        "--target-refresh-interval",
+        action="store",
+        dest="target_model_refresh_interval",
+        type=int,
+        default=1000,
+        help="Interval between the updates of the target model",
+    )
+    parser.add_argument(
+        "--initial-lr", action="store", dest="initial_lr", type=float, default=1e-3, help="Initial learning rate"
+    )
+    parser.add_argument(
+        "--lr-step", action="store", dest="lr_step", type=int, default=25_000, help="Learning rate step"
+    )
+    parser.add_argument(
+        "--lr-gamma", action="store", dest="lr_gamma", type=float, default=0.5, help="Learning rate gamma factor"
+    )
+    parser.add_argument(
+        "--model-save-path", action="store", dest="model_save_path", type=str, help="Destination path for the model"
+    )
+
+    # Parse the arguments
+    args = vars(parser.parse_args())
+    # and start training
+    train(args)

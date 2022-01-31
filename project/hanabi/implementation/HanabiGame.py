@@ -1,20 +1,12 @@
-import statistics
 from typing import Optional, List, Tuple
 import itertools
-from functools import reduce
-from operator import add
 
-import torch
 from Hint import ColorHint, Hint, ValueHint
-
 from Card import Card, Deck
 from Move import DiscardMove, HintColorMove, HintMove, PlayMove
 from Player import *
-from Learning import DRLAgent
 
 HAND_SIZE = 5
-
-eps = 0.05
 
 REWARDS = {
     "PLAYED_WRONG_CARD": -1,
@@ -121,9 +113,7 @@ class HanabiGame:
         idx = next(i for i, p in enumerate(self.player_proxies) if p.get_player() == player)
 
         self.hands[idx] = [
-            (card, hints | set([hint]))
-            if (hint.color == card.color or hint.value == card.value)
-            else (card, hints)
+            (card, hints | set([hint])) if (hint.color == card.color or hint.value == card.value) else (card, hints)
             for card, hints in self.hands[idx]
         ]
 
@@ -219,12 +209,10 @@ class HanabiGame:
             if early_stop_at and self.iter_index == (early_stop_at * len(self.player_proxies)):
                 break
 
-        for p in self.player_proxies:
-            # p.reward_player(self.score())
-            if isinstance(p.get_player(), DRLAgent):
-                # if self.score() == 0:
-                #     p.reward_player(-1)
-                p.get_player().train(p)
+        for proxy in self.player_proxies:
+            player = proxy.get_player()
+            if callable(getattr(player, "train", None)):
+                player.train(proxy)
 
         self.__log(f"Final score: {self.score()}")
 
@@ -297,52 +285,3 @@ class PlayerGameProxy:
 
     def get_turn_index(self):
         return self.game.get_turn_index()
-
-
-if __name__ == "__main__":
-    players = [
-        DRLAgent(
-            f"Player-{i}",
-            training=True,
-            initial_eps=1.0,
-            turn_dependent_eps=True,
-            eps_step=0.99995,
-            minimum_eps=0.1,
-            discount=0,
-            target_model_refresh_interval=1_000,
-        )
-        for i in range(2)
-    ]
-
-    best_score = 0
-
-    pred_deck_prob = 1.000
-
-    deck = Deck()
-    scores = []
-    for i in range(500_000):        
-        print(f"Game #{i}")
-
-        game = HanabiGame(verbose=False)
-        game_players = random.sample(players, 2)
-
-        for p in game_players:
-            if isinstance(p, DRLAgent):
-                p.prepare()
-            game.register_player(p)
-
-        game.start()
-
-        scores.append(game.score())
-        if i:
-            scores = scores[-500:]
-            print(f"Mean: {statistics.mean(scores)}")
-
-    norms = []
-    for p1 in players:
-        for p2 in players:
-            p1_params = torch.cat([p.flatten() for p in p1.frozen_model.state_dict().values()])
-            p2_params = torch.cat([p.flatten() for p in p2.frozen_model.state_dict().values()])
-            norms.append(torch.linalg.norm(p1_params - p2_params, 2))
-
-    print(norms)
