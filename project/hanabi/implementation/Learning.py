@@ -11,34 +11,66 @@ from Player import TrainablePlayer
 from actions_decoder import ActionDecoder
 from state_encoder import FlatStateEncoder
 
-class Net(nn.Module):
-    def __init__(self, n_players=5):
-        super(Net, self).__init__()
+class MLPNetwork(nn.Module):
+    """5-layers MLP
+    
+    The simple architecture of this network (only linear and ReLU layers)
+    allows to easily port an equivalent inference-only model to numpy.
+    """
 
-        players_input_size = 100 * n_players  # [40, 60, 80, 100]
+    def __init__(self, n_players=2, amp_factor = 4):
+        """Initialize the MLP network
+
+        Parameters
+        ----------
+        n_players : int
+            number of players in the game, by default 2
+        amp_factor : int, optional
+            amplification factor of the input size to produce the hidden layers, by default 4
+        """
+        super(MLPNetwork, self).__init__()
+
+        # each player is encoded through 100 values (see StateEncoder class)
+        players_input_size = 100 * n_players
+        # actions are one-hot encoded as described in the ActionDecoder class
         output_size = 10 + 10 * (n_players - 1)
 
-        input_size = players_input_size + 5 + 25 + 2  # player size + board + discard pile
-        self.fc1 = nn.Linear(input_size, input_size * 4)
-        self.fc2 = nn.Linear(input_size * 4, input_size * 4)
-        self.fc3 = nn.Linear(input_size * 4, input_size * 2)
-        self.fc4 = nn.Linear(input_size * 2, output_size * 2)
-        self.fc5 = nn.Linear(output_size * 2, output_size)
+        # total size = players sizes + board state size + discard pile state + num. of blue|red tokens
+        input_size = players_input_size + 5 + 25 + 2
 
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
-        x = F.relu(self.fc4(x))
+        self.net = nn.Sequential(
+            nn.Linear(input_size, input_size * amp_factor),
+            nn.ReLU(),
+            nn.Linear(input_size * amp_factor, input_size * amp_factor),
+            nn.ReLU(),
+            nn.Linear(input_size * amp_factor, input_size * (amp_factor // 2)),
+            nn.ReLU(),
+            nn.Linear(input_size * (amp_factor // 2), output_size * 2),
+            nn.ReLU(),
+            nn.Linear(output_size * 2, output_size)
+        )
 
-        return self.fc5(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward the input through the network.
+        
+        Parameters
+        ----------
+        x : torch.Tensor
+            input
+
+        Returns
+        -------
+        torch.Tensor
+            network's output
+        """
+        return self.net(x)
 
 
 class DRLAgent(TrainablePlayer):
     def __init__(
         self,
         name: str,
-        n_players=5,
+        network_builder=None,
         discount=0.95,
         training=True,
         eps=1.0,
@@ -48,10 +80,13 @@ class DRLAgent(TrainablePlayer):
         target_model_refresh_interval=10
     ) -> None:
         super().__init__(name)
-        self.n_players = n_players
-
-        self.model = Net(n_players)
-        self.frozen_model = Net(n_players)
+        
+        if network_builder is None:
+            self.model = MLPNetwork()
+            self.frozen_model = MLPNetwork()
+        else:
+            self.model = network_builder()
+            self.frozen_model = network_builder()
 
         self.discount = discount
         self.training = training
@@ -186,7 +221,7 @@ class DRLAgent(TrainablePlayer):
         target_Q = rewards + self.discount * non_terminal_selector * target_Q
 
         actions = torch.tensor([a for _, a, _, _ in batch])
-        actions_one_hot = torch.nn.functional.one_hot(actions, num_classes=(10 * (self.n_players)))
+        actions_one_hot = torch.nn.functional.one_hot(actions, num_classes=train_Q.shape[1])
         train_Q = torch.sum(train_Q * actions_one_hot, 1)
 
         loss = F.mse_loss(train_Q, target_Q)
