@@ -5,6 +5,8 @@ from typing import List, Set, Tuple
 from copy import deepcopy
 import random
 
+import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -381,3 +383,14 @@ class DRLAgent(TrainablePlayer):
 
         # increment the number of played games
         self.played_games += 1
+
+    def save_pytorch_model(self, path: str):
+        """Save the current PyTorch model"""
+        torch.save(self.frozen_model.state_dict(), path)
+
+    def save_numpy_model(self, path: str):
+        """Save the current model as numpy arrays"""
+        with open(path, 'wb') as f:
+            # values are save as fc1.weight, fc1.bias, fc2.weight, fc2.bias, ...
+            for value in self.frozen_model.state_dict().values():
+                np.save(f, value.numpy())
