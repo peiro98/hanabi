@@ -1,26 +1,17 @@
-from cmath import exp
-from collections import defaultdict
-import itertools
-from typing import List, Set, Tuple
-from copy import deepcopy
 import random
+from collections import defaultdict
+from typing import List, Set, Tuple
 
 import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from Card import CARD_COLORS, CARD_VALUES, Card
 from Hint import ColorHint, Hint, ValueHint
-from Card import Card, CARD_VALUES, CARD_COLORS
+from Move import HintMove
 from Player import TrainablePlayer
-from Move import (
-    DiscardMove,
-    HintColorMove,
-    HintMove,
-    HintValueMove,
-    PlayMove,
-)
+from actions_decoder import ActionDecoder
 
 # n. of players -> n. of channels in the input
 # (n. players x 2) x 5 x 5 = [100, 250] parameters
@@ -121,80 +112,6 @@ class StateEncoder:
         return state.unsqueeze(0)
 
 
-class ActionDecoder:
-    """Decode an action from a Q array"""
-
-    def __init__(self, Q: torch.tensor) -> None:
-        """
-        Initialize the action decoder.
-
-        Parameters:
-        -----------
-        Q: torch.tensor
-            output of the Q-learning model
-        """
-        self.Q = Q
-
-    def size(self):
-        return self.Q.size()[0]
-
-    def pick_action(self, mode="prob"):
-        """Pick an action
-
-        Parameters:
-        -----------
-        mode: str
-            selection mode for the action ("prob" or "max")
-        """
-        if mode not in ["prob", "max"]:
-            raise ValueError("Valid values for the mode parameter: ['max', 'prob']")
-
-        if mode == "max":
-            _, action_idx = torch.max(self.Q, 0)
-        else:
-            # transform Q values into probabilities
-            probs = torch.clone(self.Q)
-            # do not consider values below 1e-5
-            probs[probs < 1e-5] = 0.0
-            probs[probs > 0] = F.softmax(probs[probs > 0])
-            # pick an action from the categorical distribution
-            action_idx = torch.distributions.Categorical(probs).sample()
-
-        return self.get(action_idx), action_idx
-
-    def pick_random(self):
-        n_players = (self.size() - 10) // 5
-
-        c = random.choice(range(3))
-        if c == 0:
-            # random move
-            action_idx = random.choice(range(5))
-        elif c == 1:
-            # random hint
-            action_idx = random.randint(5, 5 + 10 * (n_players - 1) - 1)
-        else:
-            action_idx = random.randint(5 + 10 * (n_players - 1) - 1, 5 + 10 * (n_players - 1) - 1 + 5)
-
-        return self.get(action_idx), action_idx
-
-    def get(self, idx):
-        n_players = (self.size() - 10) // 5
-
-        if idx < 5:
-            return PlayMove(idx)
-
-        idx = idx - 5
-        if idx < 5 * (n_players - 1):
-            return HintValueMove(idx // 5, CARD_VALUES[idx % 5])
-
-        idx = idx - 5 * (n_players - 1)
-        if idx < 5 * (n_players - 1):
-            return HintColorMove(idx // 5, CARD_COLORS[idx % 5])
-
-        idx = idx - 5 * (n_players - 1)
-        return DiscardMove(idx)
-
-
 class Net(nn.Module):
     def __init__(self, n_players=5):
         super(Net, self).__init__()
@@ -287,9 +204,11 @@ class DRLAgent(TrainablePlayer):
         encoded_state = self.__get_encoded_state(proxy)
 
         # compute the output of the model
-        Q = self.model(encoded_state)
+        # the Q array returned may require gradient as a result of the network computation
+        # Therefore, .detach() allows to skip gradient computation
+        Q = self.model(encoded_state).squeeze().detach()
         # create a decoder that is used to convert Q into actual actions
-        decoder = ActionDecoder(Q.squeeze())
+        decoder = ActionDecoder(Q.numpy())
 
         action = None
         is_random_action = random.random() < self.eps_dict[proxy.get_turn_index()]

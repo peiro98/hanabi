@@ -1,7 +1,9 @@
 from typing import Union
 
+class Move:
+    pass
 
-class PlayMove:
+class PlayMove(Move):
     def __init__(self, index) -> None:
         # TODO: the constraints must depend on the player's hand size (dynamic)
         if index not in range(5):
@@ -15,7 +17,7 @@ class PlayMove:
         return self.__str__()
 
 
-class DiscardMove:
+class DiscardMove(Move):
     def __init__(self, index) -> None:
         # TODO: the constraints must depend on the player's hand size (dynamic)
         if index not in range(5):
@@ -29,7 +31,7 @@ class DiscardMove:
         return self.__str__()
 
 
-class HintMove:
+class HintMove(Move):
     def __init__(self, player: str) -> None:
         # TODO: dynamically verify the player
         self.player = player
