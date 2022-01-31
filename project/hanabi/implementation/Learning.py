@@ -2,7 +2,6 @@ import random
 from collections import defaultdict
 
 import numpy as np
-from sympy import false
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +9,7 @@ import torch.nn.functional as F
 from Move import HintMove
 from Player import TrainablePlayer
 from actions_decoder import ActionDecoder
+from replay_memory import ReplayMemory, UniformReplayMemory
 from state_encoder import FlatStateEncoder
 
 class MLPNetwork(nn.Module):
@@ -78,7 +78,9 @@ class DRLAgent(TrainablePlayer):
         eps_step=0.99995,
         minimum_eps=0.1,
         turn_dependent_eps=True,
-        target_model_refresh_interval=10
+        batch_size=64,
+        target_model_refresh_interval=10,
+        replay_memory: ReplayMemory=UniformReplayMemory(384 * 1024) 
     ) -> None:
         super().__init__(name)
         
@@ -91,9 +93,10 @@ class DRLAgent(TrainablePlayer):
 
         self.discount = discount
         self.training = training
+        self.batch_size = batch_size
 
         self.played_games = 0
-        self.experience = []
+        self.replay_memory = replay_memory
         self.target_model_refresh_interval = target_model_refresh_interval
 
         self.eps_step = eps_step
@@ -108,18 +111,18 @@ class DRLAgent(TrainablePlayer):
             self.eps = initial_eps
 
         self.optimizer = torch.optim.Adam(self.model.parameters())
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5e4, gamma=0.5)
+        self.lr_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5e4, gamma=0.5)
 
     def prepare(self):
         """Reset the state of the player
 
         This method must be called before starting a new game.
         """
+
+        # Clear the experience collected during a previous game
         self.states = []
         self.rewards = []
         self.actions = []
-
-        self.model.eval()
 
         # periodically the target model is refreshed
         if (self.played_games % self.target_model_refresh_interval) == 0:
@@ -191,59 +194,88 @@ class DRLAgent(TrainablePlayer):
         """
         self.rewards[-1] += reward
 
+    def __update_epsilon(self, turn_index):
+        if type(self.eps) == float:
+            self.eps = max(self.minimum_eps, self.eps * self.eps_step)
+        else:
+            for turn_index in range(turn_index):
+                self.eps[turn_index] = max(self.minimum_eps, self.eps[turn_index] * self.eps_step)
+
     def train(self, proxy: "PlayerGameProxy"):
         if len(self.states) == 0 or not self.training:
             return
         
-        # state, action, reward, new_state
-        for SARS in zip(self.states, self.actions, self.rewards, self.states[1:] + [None]):
-            self.experience.append(SARS)
+        # Add all the states encountered during this game to the replay memory
+        self.replay_memory.add_experience_from_game(self.states, self.actions, self.rewards)
 
-        if type(self.eps) == float:
-            self.eps = max(self.minimum_eps, self.eps * self.eps_step)
-        else:
-            for turn_index in range(proxy.get_turn_index()):
-                self.eps[turn_index] = max(self.minimum_eps, self.eps[turn_index] * self.eps_step)
+        # Update the epsilon value, possibly taking into account the number of turn completed
+        # during this game
+        self.__update_epsilon(proxy.get_turn_index())
 
+        # Set the target model in evaluation mode
         self.frozen_model.eval()
+        # and the training model in training mode
         self.model.train()
+
+        # Zero the gradients of the training model
         self.optimizer.zero_grad()
 
-        batch = list(random.sample(self.experience, min(64, len(self.experience))))
+        batch = self.replay_memory.sample(self.batch_size)
 
-        state_shape = batch[0][0].shape
+        # Compute the Q values for the observed next state(s) using the target model
+        next_states = torch.cat([
+            # next_state is None => its previous state was a terminal state
+            next_state if next_state is not None else torch.zeros(batch[0][0].shape)
+            for _, _, _, next_state in batch
+        ])
+        next_state_Q = self.frozen_model(next_states)
 
-        # compute Q targets using the frozen model
-        non_terminal_selector = torch.tensor([ns is not None for _, _, _, ns in batch], dtype=torch.int)
+        # Compute the Q values for the states using the training models
+        states = torch.cat([state for state, _, _, _ in batch])
+        current_state_Q = self.model(states)
 
-        next_states = torch.cat([ns if ns is not None else torch.zeros(state_shape) for _, _, _, ns in batch])
-        target_Q = self.frozen_model(next_states)
+        # Use the training Q values to select the best action (max on axis 1) 
+        # to perform given the current states. (In other words: use the training
+        # model to decide which are the best actions to take.)
+        _, actions_target = torch.max(current_state_Q, 1)
+        # One hot encode the actions on axis 1
+        actions_target = torch.nn.functional.one_hot(actions_target, num_classes=current_state_Q.shape[1])
 
-        states = torch.cat([s for s, _, _, _ in batch])
-        train_Q = self.model(states)
-        # compute the target actions from the train Q
-        _, actions_target = torch.max(train_Q, 1)
+        # For each action, take the corresponding Q value computed by the target model
+        # and sum to the actual rewards obtained.
+        rewards = torch.tensor([reward for _, _, reward, _ in batch])
+        # The sum is used to obtain the only non-zero element on each row
+        next_state_Q = rewards + self.discount * torch.sum(next_state_Q * actions_target, 1)
 
-        target_Q = torch.sum(target_Q * torch.nn.functional.one_hot(actions_target, num_classes=20), 1)
-        rewards = torch.tensor([r for _, _, r, _ in batch])
-        target_Q = rewards + self.discount * non_terminal_selector * target_Q
+        # One-hot encode the actual actions performed as part of the experience of the agent
+        actions = torch.tensor([action for _, action, _, _ in batch])
+        actions_one_hot = torch.nn.functional.one_hot(actions, num_classes=current_state_Q.shape[1])
+        # Compute the Q value for the pairs (current_state, performed_action)
+        current_state_Q = torch.sum(current_state_Q * actions_one_hot, 1)
 
-        actions = torch.tensor([a for _, a, _, _ in batch])
-        actions_one_hot = torch.nn.functional.one_hot(actions, num_classes=train_Q.shape[1])
-        train_Q = torch.sum(train_Q * actions_one_hot, 1)
-
-        loss = F.mse_loss(train_Q, target_Q)
+        # The loss is computed as the the difference between: 
+        #  - the current estimate of Q for the inputs (state, action)
+        #  - the sum of the actual reward and the Q value estimate by the target model 
+        #    for (next_state, next_action) where the next_action is selected by the 
+        #    training model.
+        # Broadly speaking, reduce the distance between the decisions made by the model
+        # and the evidencies from the experience.
+        loss = F.mse_loss(current_state_Q, next_state_Q)
+        
         if torch.isnan(loss):
+            # something very bad just happened
             exit(1)
 
+        # Compute the gradients from the loss
         loss.backward()
         print(loss.item())
-        self.optimizer.step()
-        self.scheduler.step()
-        
-        self.experience = self.experience[-(384*1024):]
 
-        # increment the number of played games
+        # Apply the optimizer step (recompute the parameters)
+        self.optimizer.step()
+        # and update the learning rate
+        self.lr_scheduler.step()
+
+        # Update the number of played games
         self.played_games += 1
 
     def save_pytorch_model(self, path: str):
