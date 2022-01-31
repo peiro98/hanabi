@@ -64,7 +64,7 @@ class ActionDecoder:
             raise ValueError("Valid values for the mode parameter: ['max', 'prob']")
 
         if mode == "max":
-            action_idx = np.argmax(self.Q, 0)[0]
+            action_idx = np.argmax(self.Q, 0)
         else:
             # transform Q values into probabilities
             probs = np.copy(self.Q)
