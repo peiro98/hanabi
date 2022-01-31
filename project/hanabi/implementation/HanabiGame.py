@@ -1,3 +1,4 @@
+from copy import deepcopy
 import statistics
 from typing import Optional, List, Tuple
 import itertools
@@ -319,7 +320,7 @@ if __name__ == "__main__":
             eps=.9999, 
             eps_step=.99995, 
             discount=0, 
-            target_model_refresh_interval=10_000
+            target_model_refresh_interval=1_000
         ) 
         for i in range(2)
     ]
@@ -328,23 +329,23 @@ if __name__ == "__main__":
 
     pred_deck_prob = 1.000
 
+    deck = Deck()
     scores = []
     for i in range(500_000):
         # if i > 5_000:
         #     deck = PredictableDeck() if random.random() < pred_deck_prob else Deck()
         #     pred_deck_prob = pred_deck_prob * 0.9999
         # else:
-        deck = Deck()
 
         # if i == 15_000:
         #     [p.finetune() for p in players if isinstance(p, DRLAgent)]
         
-        game = HanabiGame(deck, verbose=False)
+        game = HanabiGame(verbose=False)
             
         print(f"Game #{i}")
 
         game_players = random.sample(players, 2)
-        random.shuffle(game_players)
+        # random.shuffle(game_players)
 
         for p in game_players:
             #p.training = (i // 50) % 2 == 0

@@ -212,9 +212,8 @@ class Net(nn.Module):
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         x = F.relu(self.fc4(x))
-        Q = F.relu(self.fc5(x))
 
-        return Q
+        return self.fc5(x)
 
 
 class DRLAgent(TrainablePlayer):
@@ -250,7 +249,7 @@ class DRLAgent(TrainablePlayer):
         self.finetune_eps_step = finetune_eps_step
         self.min_eps = 0.1
 
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.00025)
+        self.optimizer = torch.optim.Adam(self.model.parameters())
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5e4, gamma=0.5)
 
     def prepare(self):
@@ -265,7 +264,7 @@ class DRLAgent(TrainablePlayer):
         self.model.eval()
 
         # periodically the target model is refreshed
-        if self.played_games and (self.played_games % self.target_model_refresh_interval) == 0:
+        if (self.played_games % self.target_model_refresh_interval) == 0:
             self.frozen_model.load_state_dict(self.model.state_dict())
 
     def __get_encoded_state(self, proxy: "PlayerGameProxy") -> torch.tensor:
@@ -339,19 +338,14 @@ class DRLAgent(TrainablePlayer):
         for SARS in zip(self.states, self.actions, self.rewards, self.states[1:] + [None]):
             self.experience.append(SARS)
 
-        if len(self.experience) < 64 * 1024:
-            print(f"not yet ({len(self.experience)})")
-            return
-
         for i in range(proxy.get_turn_index()):
-            self.eps_dict[i] *= max(self.min_eps, self.eps_dict[i] * self.eps_step)
-
+            self.eps_dict[i] = max(self.min_eps, self.eps_dict[i] * self.eps_step)
 
         self.frozen_model.eval()
         self.model.train()
         self.optimizer.zero_grad()
 
-        batch = list(random.sample(self.experience, 32))
+        batch = list(random.sample(self.experience, min(64, len(self.experience))))
 
         state_shape = batch[0][0].shape
 
@@ -383,7 +377,7 @@ class DRLAgent(TrainablePlayer):
         self.optimizer.step()
         self.scheduler.step()
         
-        self.experience = self.experience[-(256*1024):]
+        self.experience = self.experience[-(384*1024):]
 
         # increment the number of played games
         self.played_games += 1
