@@ -1,116 +1,15 @@
 import random
 from collections import defaultdict
-from typing import List, Set, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from Card import CARD_COLORS, CARD_VALUES, Card
-from Hint import ColorHint, Hint, ValueHint
 from Move import HintMove
 from Player import TrainablePlayer
 from actions_decoder import ActionDecoder
-
-# n. of players -> n. of channels in the input
-# (n. players x 2) x 5 x 5 = [100, 250] parameters
-# [player 1, color, value] = True|False if the card is known or not
-# [player 1 - hints, color, value] = True|False if the hint is given or not
-# [player 2, color, value]
-# [player 2 - hints, color, value]
-
-# for the board
-# 5 x 5 = 25 parameters
-# [color, value] = 1 if played
-
-# for the discard pile
-# 5 x 5 = 25 parameters
-# [color, value] = 1 if discarded
-
-# [
-#   play card 1             -
-#   ...                     |=> 5
-#   play card 5             -
-#   hint 1 to player 1      -
-#   ...                     |=> 20
-#   hint 5 to player 5      -
-#   hint red to player 1    -
-#   ...                     |=> 20
-#   hint yellow to player 5 -
-#   discard 1               -
-#   ...                     |=> 5
-#   discard 5               -
-# ]
-
-
-class StateEncoder:
-    """Encode the game state in torch tensors"""
-
-    def __init__(
-        self,
-        players: List[List[Tuple[Card, Set[Hint]]]],
-        board: List[Card],
-        discard_pile: List[Card],
-        blue_tokens: int,
-        red_tokens: int,
-    ) -> None:
-        # 1. compute the player state
-
-        # self.players_state = torch.zeros((n_player * 10, len(CARD_COLORS), len(CARD_VALUES)))
-        ps = 5 * 20 * len(players)
-        self.players_state = torch.zeros((ps))
-
-        for player_idx, player_state in enumerate(players):
-            for card_idx, (card, hints) in enumerate(player_state):
-                if card.color:
-                    color_idx = CARD_COLORS.index(card.color)
-                    self.players_state[100 * player_idx + 20 * card_idx + color_idx] = 1
-
-                if card.value:
-                    value_idx = CARD_VALUES.index(card.value)
-                    self.players_state[100 * player_idx + 20 * card_idx + 5 + value_idx] = 1
-
-                for i, hint in enumerate(hints):
-                    if isinstance(hint, ColorHint):
-                        color_idx = CARD_COLORS.index(hint.color)
-                        self.players_state[100 * player_idx + 20 * card_idx + 10 + color_idx] = 1
-                    elif isinstance(hint, ValueHint):
-                        value_idx = CARD_VALUES.index(card.value)
-                        self.players_state[100 * player_idx + 20 * card_idx + 10 + 5 + value_idx] = 1
-
-        # 2. compute the board state
-
-        self.board_state = torch.zeros((len(CARD_COLORS)))
-
-        for card in board:
-            color_idx = CARD_COLORS.index(card.color)
-
-            self.board_state[color_idx] = max(self.board_state[color_idx], card.value)
-
-        self.board_state = self.board_state.flatten()
-
-        # 3. compute the discard pile state
-
-        self.discard_pile_state = torch.zeros((len(CARD_COLORS), len(CARD_VALUES)))
-
-        for card in discard_pile:
-            color_idx = CARD_COLORS.index(card.color)
-            value_idx = CARD_VALUES.index(card.value)
-
-            self.discard_pile_state[color_idx, value_idx] += 1
-
-        self.discard_pile_state = self.discard_pile_state.flatten()
-
-        self.blue_tokens = blue_tokens
-        self.red_tokens = red_tokens
-
-    def get_state(self):
-        # return self.players_state, self.board_state, self.discard_pile_state, self.blue_tokens, self.red_tokens
-        state = torch.tensor([self.blue_tokens, self.red_tokens])
-        state = torch.cat([self.players_state, self.board_state, self.discard_pile_state, state])
-        return state.unsqueeze(0)
-
+from state_encoder import FlatStateEncoder
 
 class Net(nn.Module):
     def __init__(self, n_players=5):
@@ -192,16 +91,17 @@ class DRLAgent(TrainablePlayer):
         board_state = proxy.see_board()
         discard_pile_state = proxy.see_discard_pile()
 
-        return StateEncoder(
+        return FlatStateEncoder(
             players_state,
             board_state,
             discard_pile_state,
             proxy.count_blue_tokens(),
             proxy.count_red_tokens(),
-        ).get_state()
+        ).get()
 
     def step(self, proxy: "PlayerGameProxy"):
         encoded_state = self.__get_encoded_state(proxy)
+        encoded_state = torch.from_numpy(encoded_state).float()
 
         # compute the output of the model
         # the Q array returned may require gradient as a result of the network computation
