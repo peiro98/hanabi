@@ -12,14 +12,22 @@ from actions_decoder import ActionDecoder
 from replay_memory import ReplayMemory, UniformReplayMemory
 from state_encoder import FlatStateEncoder
 
+
+# See https://stackoverflow.com/a/39757388
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from HanabiGame import PlayerGameProxy
+
+
 class MLPNetwork(nn.Module):
     """5-layers MLP
-    
+
     The simple architecture of this network (only linear and ReLU layers)
     allows to easily port an equivalent inference-only model to numpy.
     """
 
-    def __init__(self, n_players=2, amp_factor = 4):
+    def __init__(self, n_players=2, amp_factor=4):
         """Initialize the MLP network
 
         Parameters
@@ -48,12 +56,12 @@ class MLPNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(input_size * (amp_factor // 2), output_size * 2),
             nn.ReLU(),
-            nn.Linear(output_size * 2, output_size)
+            nn.Linear(output_size * 2, output_size),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward the input through the network.
-        
+
         Parameters
         ----------
         x : torch.Tensor
@@ -68,6 +76,11 @@ class MLPNetwork(nn.Module):
 
 
 class DRLAgent(TrainablePlayer):
+    """Double Q-Learning
+
+    See [Deep Reinforcement Learning with Double Q-learning](https://arxiv.org/pdf/1509.06461.pdf)
+    """
+
     def __init__(
         self,
         name: str,
@@ -80,10 +93,10 @@ class DRLAgent(TrainablePlayer):
         turn_dependent_eps=True,
         batch_size=64,
         target_model_refresh_interval=10,
-        replay_memory: ReplayMemory=UniformReplayMemory(384 * 1024) 
+        replay_memory: ReplayMemory = UniformReplayMemory(384 * 1024),
     ) -> None:
         super().__init__(name)
-        
+
         if network_builder is None:
             self.model = MLPNetwork()
             self.frozen_model = MLPNetwork()
@@ -142,28 +155,28 @@ class DRLAgent(TrainablePlayer):
             proxy.count_red_tokens(),
         ).get()
 
-    def step(self, proxy: "PlayerGameProxy"):
+    def step(self, proxy: PlayerGameProxy):
         # Extract the current state from the game's proxy
         encoded_state = self.__get_encoded_state(proxy)
         # Convert the encoded state to a torch float tensor
         encoded_state = torch.from_numpy(encoded_state).float()
 
         # Compute the output of the training model
-        self.model.eval() # Make sure the network is in evaluation mode
-        with torch.no_grad(): # Do not generate gradients
-            Q = self.model(encoded_state).squeeze().detach()
+        self.model.eval()  # Make sure the network is in evaluation mode
+        with torch.no_grad():  # Do not generate gradients
+            Q = self.model(encoded_state).squeeze()
         # Instantiate an action decoder for the network output
         decoder = ActionDecoder(Q.numpy())
 
         action = None
 
         is_random_action = False
-        # Select the epsilon coefficient 
+        # Select the epsilon coefficient
         eps = self.eps if type(self.eps) == float else self.eps[proxy.get_turn_index()]
         # Generate a random number in [0, 1] to decide whether the player
         # is going to act greedily or not
         is_random_action = random.random() < eps
-            
+
         if is_random_action:
             # pick a random action
             action, action_idx = decoder.pick_random()
@@ -201,10 +214,10 @@ class DRLAgent(TrainablePlayer):
             for turn_index in range(turn_index):
                 self.eps[turn_index] = max(self.minimum_eps, self.eps[turn_index] * self.eps_step)
 
-    def train(self, proxy: "PlayerGameProxy"):
+    def train(self, proxy: PlayerGameProxy):
         if len(self.states) == 0 or not self.training:
             return
-        
+
         # Add all the states encountered during this game to the replay memory
         self.replay_memory.add_experience_from_game(self.states, self.actions, self.rewards)
 
@@ -222,46 +235,68 @@ class DRLAgent(TrainablePlayer):
 
         batch = self.replay_memory.sample(self.batch_size)
 
-        # Compute the Q values for the observed next state(s) using the target model
-        next_states = torch.cat([
-            # next_state is None => its previous state was a terminal state
-            next_state if next_state is not None else torch.zeros(batch[0][0].shape)
-            for _, _, _, next_state in batch
-        ])
-        next_state_Q = self.frozen_model(next_states)
+        # Convert the next states into an array of size (batch_size, state_size)
+        next_states = torch.cat(
+            [
+                # next_state is None => its previous state was a terminal state
+                next_state if next_state is not None else torch.zeros(batch[0][0].shape)
+                for _, _, _, next_state in batch
+            ]
+        )
 
-        # Compute the Q values for the states using the training models
-        states = torch.cat([state for state, _, _, _ in batch])
-        current_state_Q = self.model(states)
+        ####################
+        # Action selection #
+        ####################
 
-        # Use the training Q values to select the best action (max on axis 1) 
-        # to perform given the current states. (In other words: use the training
-        # model to decide which are the best actions to take.)
-        _, actions_target = torch.max(current_state_Q, 1)
+        # Select the best ACTION to perform in the NEXT STATE(S) according to the ONLINE NETWORK
+        with torch.no_grad():
+            next_Q_online = self.model(next_states)
+
+        _, selected_actions = torch.max(next_Q_online, 1)
         # One hot encode the actions on axis 1
-        actions_target = torch.nn.functional.one_hot(actions_target, num_classes=current_state_Q.shape[1])
+        selected_actions = torch.nn.functional.one_hot(selected_actions, num_classes=next_Q_online.shape[1])
+
+        #####################
+        # Action evaluation #
+        #####################
+
+        # Evaluate Q for the NEXT STATE(S) according to the TARGET NETWORK
+        with torch.no_grad():
+            next_Q_target = self.frozen_model(next_states)
 
         # For each action, take the corresponding Q value computed by the target model
         # and sum to the actual rewards obtained.
         rewards = torch.tensor([reward for _, _, reward, _ in batch])
         # The sum is used to obtain the only non-zero element on each row
-        next_state_Q = rewards + self.discount * torch.sum(next_state_Q * actions_target, 1)
+        next_Q = rewards + self.discount * torch.sum(next_Q_target * selected_actions, 1)
+
+        ########################
+        # Current Q evaluation #
+        ########################
+
+        # Compute the Q values for the states using the training models
+        states = torch.cat([state for state, _, _, _ in batch])
+        current_Q = self.model(states)
 
         # One-hot encode the actual actions performed as part of the experience of the agent
         actions = torch.tensor([action for _, action, _, _ in batch])
-        actions_one_hot = torch.nn.functional.one_hot(actions, num_classes=current_state_Q.shape[1])
+        actions_one_hot = torch.nn.functional.one_hot(actions, num_classes=current_Q.shape[1])
         # Compute the Q value for the pairs (current_state, performed_action)
-        current_state_Q = torch.sum(current_state_Q * actions_one_hot, 1)
+        current_Q = torch.sum(current_Q * actions_one_hot, 1)
 
-        # The loss is computed as the the difference between: 
+        ###################
+        # Loss evaluation #
+        ###################
+
+        # The loss is computed as the the difference between:
         #  - the current estimate of Q for the inputs (state, action)
-        #  - the sum of the actual reward and the Q value estimate by the target model 
-        #    for (next_state, next_action) where the next_action is selected by the 
+        #  - the sum of the actual reward and the Q value estimate by the target model
+        #    for (next_state, next_action) where the next_action is selected by the
         #    training model.
         # Broadly speaking, reduce the distance between the decisions made by the model
         # and the evidencies from the experience.
-        loss = F.mse_loss(current_state_Q, next_state_Q)
-        
+        loss = F.mse_loss(current_Q, next_Q)
+
         if torch.isnan(loss):
             # something very bad just happened
             exit(1)
@@ -284,7 +319,7 @@ class DRLAgent(TrainablePlayer):
 
     def save_numpy_model(self, path: str):
         """Save the current model as numpy arrays"""
-        with open(path, 'wb') as f:
+        with open(path, "wb") as f:
             # values are save as fc1.weight, fc1.bias, fc2.weight, fc2.bias, ...
             for value in self.frozen_model.state_dict().values():
                 np.save(f, value.numpy())
