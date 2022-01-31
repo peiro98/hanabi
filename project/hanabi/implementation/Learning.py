@@ -2,6 +2,7 @@ import random
 from collections import defaultdict
 
 import numpy as np
+from sympy import false
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -73,10 +74,10 @@ class DRLAgent(TrainablePlayer):
         network_builder=None,
         discount=0.95,
         training=True,
-        eps=1.0,
-        eps_step=0.999,
-        finetune_eps=0.2,
-        finetune_eps_step=0.9999,
+        initial_eps=1.000,
+        eps_step=0.99995,
+        minimum_eps=0.1,
+        turn_dependent_eps=True,
         target_model_refresh_interval=10
     ) -> None:
         super().__init__(name)
@@ -95,12 +96,16 @@ class DRLAgent(TrainablePlayer):
         self.experience = []
         self.target_model_refresh_interval = target_model_refresh_interval
 
-        self.eps = eps
-        self.eps_dict = defaultdict(lambda: self.eps)
         self.eps_step = eps_step
-        self.finetune_eps = finetune_eps
-        self.finetune_eps_step = finetune_eps_step
-        self.min_eps = 0.1
+        self.minimum_eps = minimum_eps
+        if turn_dependent_eps:
+            # The epsilon coefficient is determined according to the turn number.
+            # At the end of the game, the epsilon values "used" during the game
+            # are decreased by a factor self.eps_step
+            self.eps = defaultdict(lambda: initial_eps)
+        else:
+            # There is only one global epsilon coefficient
+            self.eps = initial_eps
 
         self.optimizer = torch.optim.Adam(self.model.parameters())
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5e4, gamma=0.5)
@@ -135,34 +140,34 @@ class DRLAgent(TrainablePlayer):
         ).get()
 
     def step(self, proxy: "PlayerGameProxy"):
+        # Extract the current state from the game's proxy
         encoded_state = self.__get_encoded_state(proxy)
+        # Convert the encoded state to a torch float tensor
         encoded_state = torch.from_numpy(encoded_state).float()
 
-        # compute the output of the model
-        # the Q array returned may require gradient as a result of the network computation
-        # Therefore, .detach() allows to skip gradient computation
-        Q = self.model(encoded_state).squeeze().detach()
-        # create a decoder that is used to convert Q into actual actions
+        # Compute the output of the training model
+        self.model.eval() # Make sure the network is in evaluation mode
+        with torch.no_grad(): # Do not generate gradients
+            Q = self.model(encoded_state).squeeze().detach()
+        # Instantiate an action decoder for the network output
         decoder = ActionDecoder(Q.numpy())
 
         action = None
-        is_random_action = random.random() < self.eps_dict[proxy.get_turn_index()]
-        while (
-            action is None
-            # hints are not available
-            # or (isinstance(action, HintMove) and proxy.count_blue_tokens() <= 0)
-            # do not play or discard if this is the game's first turn
-            # or ((isinstance(action, PlayMove) or isinstance(action, DiscardMove)) and proxy.get_turn_index() == 0)
-        ):
-            # generate a random number in [0, 1] to decide whether the player
-            # is going to act greedily or not
-            if is_random_action or action is not None:
-                # act greedily
-                action, action_idx = decoder.pick_random()
-            else:
-                # pick the best action
-                # (mode='prob' appears to perform badly and/or the training is very slow)
-                action, action_idx = decoder.pick_action(mode="max")
+
+        is_random_action = False
+        # Select the epsilon coefficient 
+        eps = self.eps if type(self.eps) == float else self.eps[proxy.get_turn_index()]
+        # Generate a random number in [0, 1] to decide whether the player
+        # is going to act greedily or not
+        is_random_action = random.random() < eps
+            
+        if is_random_action:
+            # pick a random action
+            action, action_idx = decoder.pick_random()
+        else:
+            # act greedily
+            # (mode='prob' appears to perform badly and/or the training is very slow)
+            action, action_idx = decoder.pick_action(mode="max")
 
         # hint actions refer to players using their indices
         if isinstance(action, HintMove):
@@ -194,8 +199,11 @@ class DRLAgent(TrainablePlayer):
         for SARS in zip(self.states, self.actions, self.rewards, self.states[1:] + [None]):
             self.experience.append(SARS)
 
-        for i in range(proxy.get_turn_index()):
-            self.eps_dict[i] = max(self.min_eps, self.eps_dict[i] * self.eps_step)
+        if type(self.eps) == float:
+            self.eps = max(self.minimum_eps, self.eps * self.eps_step)
+        else:
+            for turn_index in range(proxy.get_turn_index()):
+                self.eps[turn_index] = max(self.minimum_eps, self.eps[turn_index] * self.eps_step)
 
         self.frozen_model.eval()
         self.model.train()

@@ -1,4 +1,3 @@
-from copy import deepcopy
 import statistics
 from typing import Optional, List, Tuple
 import itertools
@@ -8,7 +7,7 @@ from operator import add
 import torch
 from Hint import ColorHint, Hint, ValueHint
 
-from Card import Card, Deck, PredictableDeck
+from Card import Card, Deck
 from Move import DiscardMove, HintColorMove, HintMove, PlayMove
 from Player import *
 from Learning import DRLAgent
@@ -21,14 +20,14 @@ REWARDS = {
     "PLAYED_WRONG_CARD": -1,
     "PLAYED_CARD_WITHOUT_HINTS": -0.75,
     "PLAYED_CARD_WITH_ONLY_ONE_HINT": -0.25,
-    "DISCARDED_CARD_WITHOUT_HINTS": -.5,
-    "DISCARDED_CARD_WITH_ONLY_ONE_HINT": -.2,
-    "DISCARDED_UNPLAYABLE_CARD": +.05,
+    "DISCARDED_CARD_WITHOUT_HINTS": -0.5,
+    "DISCARDED_CARD_WITH_ONLY_ONE_HINT": -0.2,
+    "DISCARDED_UNPLAYABLE_CARD": +0.05,
     "DISCARDED_PLAYABLE_CARD": -0.5,
     "PLAYED_CORRECT_CARD": +1,
     "HINTED_CARD_WITHOUT_PREVIOUS_HINTS": +0.2,
     "HINTED_CARD_WITH_ONE_PREVIOUS_HINT": +0.1,
-    "HINTED_FULLY_KNOWN_CARD": -.75,
+    "HINTED_FULLY_KNOWN_CARD": -0.75,
     "ILLEGAL": -1
     # "PLAYED_WRONG_CARD": 0,
     # "PLAYED_CARD_WITHOUT_HINTS": 0,
@@ -87,9 +86,7 @@ class HanabiGame:
             raise ValueError("Invalid player")
 
         # TODO: please change the following line
-        return self.hands[
-            [proxy.get_player() for proxy in self.player_proxies].index(player)
-        ]
+        return self.hands[[proxy.get_player() for proxy in self.player_proxies].index(player)]
 
     def get_board(self):
         return self.board
@@ -116,18 +113,12 @@ class HanabiGame:
 
     def __find_player_by_name(self, name: str):
         return next(
-            (
-                p.get_player()
-                for p in self.player_proxies
-                if p.get_player().name == name
-            ),
+            (p.get_player() for p in self.player_proxies if p.get_player().name == name),
             None,
         )
 
     def __apply_hint(self, player: Player, hint: Hint):
-        idx = next(
-            i for i, p in enumerate(self.player_proxies) if p.get_player() == player
-        )
+        idx = next(i for i, p in enumerate(self.player_proxies) if p.get_player() == player)
 
         self.hands[idx] = [
             (card, {reduce(add, hints | set([hint]))})
@@ -167,8 +158,8 @@ class HanabiGame:
                         if p.get_player() == proxy.get_player():
                             p.reward_player(REWARDS["PLAYED_CORRECT_CARD"])
                         else:
-                            p.reward_player(REWARDS["PLAYED_CORRECT_CARD"] * .5)
-                    
+                            p.reward_player(REWARDS["PLAYED_CORRECT_CARD"] * 0.5)
+
                     if card.value == 5:
                         self.blue_tokens += 1
                 else:
@@ -234,9 +225,9 @@ class HanabiGame:
                 # if self.score() == 0:
                 #     p.reward_player(-1)
                 p.get_player().train(p)
-        
+
         self.__log(f"Final score: {self.score()}")
-    
+
     def get_turn_index(self):
         return self.iter_index // len(self.player_proxies)
 
@@ -277,11 +268,7 @@ class PlayerGameProxy:
 
     def get_other_players(self) -> List[Player]:
         # TODO: use a set
-        return [
-            p.get_player()
-            for p in self.game.player_proxies
-            if p.get_player() != self.player
-        ]
+        return [p.get_player() for p in self.game.player_proxies if p.get_player() != self.player]
 
     def step(self):
         global eps
@@ -314,14 +301,16 @@ class PlayerGameProxy:
 
 if __name__ == "__main__":
     players = [
-        DRLAgent(f"Player-{i}", 
-            n_players=2, 
-            training=True, 
-            eps=.9999, 
-            eps_step=.99995, 
-            discount=0, 
-            target_model_refresh_interval=1_000
-        ) 
+        DRLAgent(
+            f"Player-{i}",
+            training=True,
+            initial_eps=1.0,
+            turn_dependent_eps=True,
+            eps_step=0.99995,
+            minimum_eps=0.1,
+            discount=0,
+            target_model_refresh_interval=1_000,
+        )
         for i in range(2)
     ]
 
@@ -331,33 +320,18 @@ if __name__ == "__main__":
 
     deck = Deck()
     scores = []
-    for i in range(500_000):
-        # if i > 5_000:
-        #     deck = PredictableDeck() if random.random() < pred_deck_prob else Deck()
-        #     pred_deck_prob = pred_deck_prob * 0.9999
-        # else:
-
-        # if i == 15_000:
-        #     [p.finetune() for p in players if isinstance(p, DRLAgent)]
-        
-        game = HanabiGame(verbose=False)
-            
+    for i in range(500_000):        
         print(f"Game #{i}")
 
+        game = HanabiGame(verbose=False)
         game_players = random.sample(players, 2)
-        # random.shuffle(game_players)
 
         for p in game_players:
-            #p.training = (i // 50) % 2 == 0
             if isinstance(p, DRLAgent):
                 p.prepare()
             game.register_player(p)
 
-        # game.start(early_stop_at=(i // 500 + 1) * 3)
         game.start()
-
-        #eps = eps * 0.9995
-        # print(eps)
 
         scores.append(game.score())
         if i:
