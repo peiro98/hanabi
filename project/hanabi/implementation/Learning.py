@@ -94,7 +94,44 @@ class DRLAgent(TrainablePlayer):
         batch_size=64,
         target_model_refresh_interval=10,
         replay_memory: ReplayMemory = UniformReplayMemory(384 * 1024),
+        initial_lr=1e-3,
+        lr_gamma=0.5,
+        lr_step=25_000,
     ) -> None:
+        """Instantiate a Double Q-Learning agent
+
+        Parameters
+        ----------
+        name : str
+            Name of the agent
+        network_builder : Any, optional
+            a builder function for the DQN network used by the agent
+        discount : float, optional
+            discount factor, by default 0.95
+        training : bool, optional
+            whether the agent is in training mode or not, by default True
+        initial_eps : float, optional
+            initial epsilon coefficient (probability of a random action), by default 1.000
+        eps_step : float, optional
+            linear step for the epsilon coefficient, by default 0.99995
+        minimum_eps : float, optional
+            minimum value for the epsilon coefficient, by default 0.1
+        turn_dependent_eps : bool, optional
+            if true the epsilon coefficient is a function of the depth
+            reached during the games simulated so far, by default True
+        batch_size : int, optional
+            batch size to sample during training, by default 64
+        target_model_refresh_interval : int, optional
+            interval between the updates of the target network, by default 10
+        replay_memory : ReplayMemory, optional
+            replay memory, by default UniformReplayMemory(384 * 1024)
+        initial_lr : [type], optional
+            initial learning rate, by default 1e-3
+        lr_gamma : int, optional
+            multiplicative factor of the learning rate, by default 10
+        lr_step : int, optional
+            interval between the updates of the learning rate, by default 25_000
+        """
         super().__init__(name)
 
         if network_builder is None:
@@ -112,6 +149,7 @@ class DRLAgent(TrainablePlayer):
         self.replay_memory = replay_memory
         self.target_model_refresh_interval = target_model_refresh_interval
 
+        # Setup the epsilion coefficient and its decay
         self.eps_step = eps_step
         self.minimum_eps = minimum_eps
         if turn_dependent_eps:
@@ -123,8 +161,11 @@ class DRLAgent(TrainablePlayer):
             # There is only one global epsilon coefficient
             self.eps = initial_eps
 
-        self.optimizer = torch.optim.Adam(self.model.parameters())
-        self.lr_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5e4, gamma=0.5)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=initial_lr)
+        # Decrease the lr by a factor lr_gamma every lr_step iterations
+        self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+            self.optimizer, lr_lambda=lambda iter: lr_gamma ** (iter // lr_step)
+        )
 
     def prepare(self):
         """Reset the state of the player
@@ -155,7 +196,7 @@ class DRLAgent(TrainablePlayer):
             proxy.count_red_tokens(),
         ).get()
 
-    def step(self, proxy: PlayerGameProxy):
+    def step(self, proxy: "PlayerGameProxy"):
         # Extract the current state from the game's proxy
         encoded_state = self.__get_encoded_state(proxy)
         # Convert the encoded state to a torch float tensor
@@ -214,7 +255,7 @@ class DRLAgent(TrainablePlayer):
             for turn_index in range(turn_index):
                 self.eps[turn_index] = max(self.minimum_eps, self.eps[turn_index] * self.eps_step)
 
-    def train(self, proxy: PlayerGameProxy):
+    def train(self, proxy: "PlayerGameProxy"):
         if len(self.states) == 0 or not self.training:
             return
 
