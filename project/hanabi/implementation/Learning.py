@@ -249,6 +249,13 @@ class DRLAgent(TrainablePlayer):
         self.rewards[-1] += reward
 
     def __update_epsilon(self, turn_index):
+        """Update the epsilon coefficient (probability of a random action)
+
+        Parameters
+        ----------
+        turn_index : int
+            number of completed turns
+        """
         if type(self.eps) == float:
             self.eps = max(self.minimum_eps, self.eps * self.eps_step)
         else:
@@ -355,11 +362,23 @@ class DRLAgent(TrainablePlayer):
         self.played_games += 1
 
     def save_pytorch_model(self, path: str):
-        """Save the current PyTorch model"""
+        """Save the current PyTorch model
+
+        Parameters
+        ----------
+        path : str
+            destination path
+        """
         torch.save(self.frozen_model.state_dict(), path)
 
     def save_numpy_model(self, path: str):
-        """Save the current model as numpy arrays"""
+        """Save the current model as numpy arrays
+
+        Parameters
+        ----------
+        path : str
+            destination path
+        """
         with open(path, "wb") as f:
             # values are save as fc1.weight, fc1.bias, fc2.weight, fc2.bias, ...
             for value in self.frozen_model.state_dict().values():

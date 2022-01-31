@@ -128,6 +128,7 @@ class FlatStateEncoder(StateEncoder):
                     # the entries [5..9] of each card's state encode the color
                     self.players_state[state_idx + 5 + value_idx] = 1
 
+                assert(len(hints) <= 2)
                 for hint in hints:
                     # for each hint provided for this card
 

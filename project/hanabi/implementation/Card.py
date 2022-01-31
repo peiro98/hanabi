@@ -1,5 +1,5 @@
 from typing import List, Optional
-from random import shuffle, seed, random
+from random import shuffle
 from itertools import product
 
 from Hint import ColorHint, Hint, ValueHint
@@ -45,11 +45,7 @@ class Card:
         return Card(color, value)
 
     def __eq__(self, __o: object) -> bool:
-        return (
-            isinstance(__o, Card)
-            and self.color == __o.color
-            and self.value == __o.value
-        )
+        return isinstance(__o, Card) and self.color == __o.color and self.value == __o.value
 
     def __str__(self) -> str:
         return f"({self.color or '-'}, {self.value or '-'})"
@@ -65,14 +61,14 @@ def build_cards_deck() -> List[Card]:
     """
     return [
         Card(color, value)
-        for color, (value, n) in product(
-            CARD_COLORS, zip(CARD_VALUES, CARD_AVAILABILITY)
-        )
+        for color, (value, n) in product(CARD_COLORS, zip(CARD_VALUES, CARD_AVAILABILITY))
         for _ in range(n)
     ]
 
 
 class Deck:
+    """A deck of cards"""
+
     def __init__(self) -> None:
         # load and shuffle the cards deck
         self.cards = build_cards_deck()
@@ -94,10 +90,26 @@ class Deck:
 
 
 class PredictableDeck(Deck):
+    """A predictable deck of cards
+
+    One of the players gets an hand full of 1s. Indeed, the first
+    two hands are:
+     - [(Y, 3), (R, 2), (B, 5), (Y, 2), (G, 4)]
+     - [(W, 1), (B, 1), (R, 1), (G, 1), (Y, 1)]
+    """
+
     def __init__(self) -> None:
         self.cards = [
-            Card("Y", 3), Card("R", 2), Card("B", 5), Card("Y", 2), Card("G", 4),
-            Card("W", 1), Card("B", 1), Card("R", 1), Card("G", 1), Card("Y", 1), 
+            Card("Y", 3),
+            Card("R", 2),
+            Card("B", 5),
+            Card("Y", 2),
+            Card("G", 4),
+            Card("W", 1),
+            Card("B", 1),
+            Card("R", 1),
+            Card("G", 1),
+            Card("Y", 1),
         ]
         self.cards = [*self.cards, *[c for c in build_cards_deck() if c not in self.cards]]
         self.cards = self.cards[::-1]
