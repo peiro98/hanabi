@@ -1,5 +1,4 @@
 from __future__ import annotations
-from distutils.command.config import config
 
 import random
 from abc import ABC, abstractmethod
@@ -9,9 +8,9 @@ import sys
 import time
 import logging
 
-from Hint import ColorHint
-from Move import Move, PlayMove, DiscardMove, HintMove, HintColorMove, HintValueMove
-from Card import CARD_COLORS, Card
+from hints import ColorHint
+from moves import Move, PlayMove, DiscardMove, HintMove, HintColorMove, HintValueMove
+from cards import CARD_COLORS, Card
 
 from state_encoder import FlatStateEncoder, StateEncoder
 from actions_decoder import ActionDecoder
@@ -22,7 +21,7 @@ import numpy as np
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from HanabiGame import PlayerGameProxy
+    from project.hanabi.implementation.hanabi_game import PlayerGameProxy
 
 
 class Player(ABC):
@@ -371,7 +370,7 @@ if __name__ == "__main__":
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
     # Run a game
-    from HanabiGame import HanabiGame
+    from project.hanabi.implementation.hanabi_game import HanabiGame
 
     players = [
         DRLNonTrainableAgent(f"P{i}", filenames={

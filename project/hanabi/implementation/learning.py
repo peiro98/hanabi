@@ -13,19 +13,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from Move import HintMove
-from Player import TrainablePlayer, DRLNonTrainableAgent
+from moves import HintMove
+from players import TrainablePlayer, DRLNonTrainableAgent
 from actions_decoder import ActionDecoder
 from replay_memory import ReplayMemory, UniformReplayMemory
 from state_encoder import FlatStateEncoder
-from HanabiGame import HanabiGame
+from hanabi_game import HanabiGame
 
 
 # See https://stackoverflow.com/a/39757388
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from HanabiGame import PlayerGameProxy
+    from project.hanabi.implementation.hanabi_game import PlayerGameProxy
 
 
 class MLPNetwork(nn.Module):

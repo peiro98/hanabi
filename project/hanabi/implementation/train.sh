@@ -18,7 +18,7 @@ for NUM_PLAYERS in 2 3 4 5
 do
     MODEL_SAVE_PATH="models/DQN_${NUM_PLAYERS}_players"
 
-    python Learning.py --players $NUM_PLAYERS \
+    python learning.py --players $NUM_PLAYERS \
         --training-players $NUM_TRAINING_PLAYER \
         --iterations $N_ITERATIONS \
         --discount $DISCOUNT \

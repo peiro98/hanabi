@@ -2,7 +2,7 @@ from typing import List, Optional
 from random import shuffle
 from itertools import product
 
-from Hint import ColorHint, Hint, ValueHint
+from hints import ColorHint, Hint, ValueHint
 
 # card colors
 CARD_COLORS = ["R", "Y", "G", "B", "W"]

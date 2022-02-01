@@ -3,8 +3,8 @@ from typing import List, Tuple, Set
 
 import numpy as np
 
-from Card import CARD_COLORS, CARD_VALUES, Card
-from Hint import Hint, ColorHint, ValueHint
+from cards import CARD_COLORS, CARD_VALUES, Card
+from hints import Hint, ColorHint, ValueHint
 
 
 class StateEncoder(ABC):

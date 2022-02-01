@@ -2,10 +2,10 @@ import logging
 from typing import Optional, List, Tuple
 import itertools
 
-from Hint import ColorHint, Hint, ValueHint
-from Card import Card, Deck
-from Move import DiscardMove, HintColorMove, HintMove, PlayMove
-from Player import *
+from hints import ColorHint, Hint, ValueHint
+from cards import Card, Deck
+from moves import DiscardMove, HintColorMove, HintMove, PlayMove
+from players import *
 
 HAND_SIZE = 5
 
