@@ -3,6 +3,10 @@ import argparse
 import statistics
 from collections import defaultdict
 import json
+import time
+import logging
+import sys
+import os
 
 import numpy as np
 import torch
@@ -96,7 +100,7 @@ class DRLAgent(TrainablePlayer):
         minimum_eps=0.1,
         turn_dependent_eps=True,
         batch_size=64,
-        target_model_refresh_interval=10,
+        target_model_refresh_interval=1000,
         replay_memory: ReplayMemory = UniformReplayMemory(384 * 1024),
         initial_lr=1e-3,
         lr_gamma=0.5,
@@ -150,6 +154,7 @@ class DRLAgent(TrainablePlayer):
         self.batch_size = batch_size
 
         self.played_games = 0
+        self.training_losses = []
         self.replay_memory = replay_memory
         self.target_model_refresh_interval = target_model_refresh_interval
 
@@ -185,6 +190,7 @@ class DRLAgent(TrainablePlayer):
         # periodically the target model is refreshed
         if (self.played_games % self.target_model_refresh_interval) == 0:
             self.frozen_model.load_state_dict(self.model.state_dict())
+            logging.debug(f"{self.name} refreshed the target model")
 
     def __get_encoded_state(self, proxy: "PlayerGameProxy") -> torch.tensor:
         """Encode the current game state"""
@@ -239,6 +245,8 @@ class DRLAgent(TrainablePlayer):
         self.states.append(torch.clone(encoded_state))
         self.rewards.append(0)
         self.actions.append(action_idx)
+
+        logging.debug(f"{self.name} selected action {action}")
 
         return action
 
@@ -351,11 +359,15 @@ class DRLAgent(TrainablePlayer):
 
         if torch.isnan(loss):
             # something very bad just happened
+            logging.critical(f"{self.name} got a critical loss!")
             exit(1)
+
+        self.training_losses.append(loss.item())
+        avg_training_loss = statistics.mean(self.training_losses)
+        logging.info(f"{self.name} got training loss {loss:.4f} (average loss is {avg_training_loss:.4f})")
 
         # Compute the gradients from the loss
         loss.backward()
-        print(loss.item())
 
         # Apply the optimizer step (recompute the parameters)
         self.optimizer.step()
@@ -435,7 +447,10 @@ def train(args: dict):
         training_scores.append(game.score())
 
         avg_training_score = statistics.mean(training_scores[-500:])
-        print(f"[{i}/{num_iterations}]: moving avg of the last 500 runs is {avg_training_score:.4f}")
+        logging.info(
+            f"Game {i + 1}/{num_iterations} ended with score {game.score():.4f}"
+            f"(moving average score of the last 500 scores is {avg_training_score:.4f})"
+        )
 
     if args["model_save_path"] is not None:
         filename = args["model_save_path"]
@@ -550,5 +565,18 @@ if __name__ == "__main__":
 
     # Parse the arguments
     args = vars(parser.parse_args())
+
+    # Setup logging
+    if not os.path.exists("logs"):
+        os.mkdir("logs")
+    filename = time.strftime("%Y_%m_%d-%I_%M_%S_%p")
+    logging.basicConfig(
+        filename=f"logs/{filename}.log",
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s: %(message)s",
+        datefmt="%m/%d/%Y %I:%M:%S %p",
+    )
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
     # and start training
     train(args)

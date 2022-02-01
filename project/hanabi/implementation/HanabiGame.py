@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, List, Tuple
 import itertools
 
@@ -138,17 +139,18 @@ class HanabiGame:
                 # extract the card to play
                 card, hints = hand.pop(move.index)
 
-                # TODO: replace with logging function
-                self.__log(f"Player {proxy.get_player()} plays {card}")
-
                 if self.__is_playable(card):
                     # play the card and grant one blue token
                     self.board.append(card)
                     for p in self.player_proxies:
                         if p.get_player() == proxy.get_player():
-                            p.reward_player(REWARDS["PLAYED_CORRECT_CARD"])
+                            reward = REWARDS["PLAYED_CORRECT_CARD"]
+                            logging.debug(f"Correct card played: assigning {reward} to {p.get_player().name}")
+                            p.reward_player(reward)
                         else:
-                            p.reward_player(REWARDS["PLAYED_CORRECT_CARD"] * 0.5)
+                            reward = REWARDS["PLAYED_CORRECT_CARD"] * 0.5
+                            logging.debug(f"Correct card played: assigning {reward} to {p.get_player().name}")
+                            p.reward_player(REWARDS["PLAYED_CORRECT_CARD"])
 
                     if card.value == 5:
                         self.blue_tokens += 1
@@ -156,12 +158,18 @@ class HanabiGame:
                     # move the card in the discard pile and remove one red token
                     self.discard_pile.append(card)
                     self.red_tokens -= 1
-                    proxy.reward_player(REWARDS["PLAYED_WRONG_CARD"])
+                    reward = REWARDS["PLAYED_WRONG_CARD"]
+                    logging.debug(f"Wrong card played: assigning {reward} to {proxy.get_player().name}")
+                    proxy.reward_player(reward)
 
                 if len(hints) == 0:
-                    proxy.reward_player(REWARDS["PLAYED_CARD_WITHOUT_HINTS"])
+                    reward = REWARDS["PLAYED_CARD_WITHOUT_HINTS"]
+                    logging.debug(f"Played card without hints: assigning {reward} to {proxy.get_player().name}")
+                    proxy.reward_player(reward)
                 elif len(hints) == 1:
-                    proxy.reward_player(REWARDS["PLAYED_CARD_WITH_ONLY_ONE_HINT"])
+                    reward = REWARDS["PLAYED_CARD_WITH_ONLY_ONE_HINT"]
+                    logging.debug(f"Played card with only one hint: assigning {reward} to {proxy.get_player().name}")
+                    proxy.reward_player(reward)
 
                 # refill the hand
                 hand.insert(0, (self.deck.pick_card(), set()))
@@ -169,20 +177,28 @@ class HanabiGame:
                 # extract the card to discard
                 card, hints = hand.pop(move.index)
 
-                self.__log(f"Player {proxy.get_player()} discards {card}")
-
                 # discard the card and grant one blue token
                 self.discard_pile.append(card)
                 self.blue_tokens += 1
 
                 if len(hints) == 0:
+                    reward = REWARDS["DISCARDED_CARD_WITHOUT_HINTS"]
+                    logging.debug(f"Discarded card without hints: assigning {reward} to {proxy.get_player().name}")
                     proxy.reward_player(REWARDS["DISCARDED_CARD_WITHOUT_HINTS"])
                 elif len(hints) == 1:
+                    reward = REWARDS["DISCARDED_CARD_WITH_ONLY_ONE_HINT"]
+                    logging.debug(
+                        f"Discarded card with only one hints: assigning {reward} to {proxy.get_player().name}"
+                    )
                     proxy.reward_player(REWARDS["DISCARDED_CARD_WITH_ONLY_ONE_HINT"])
 
                 if not self.__is_playable(card):
+                    reward = REWARDS["DISCARDED_UNPLAYABLE_CARD"]
+                    logging.debug(f"Discarded unplayable card: assigning {reward} to {proxy.get_player().name}")
                     proxy.reward_player(REWARDS["DISCARDED_UNPLAYABLE_CARD"])
                 else:
+                    reward = REWARDS["DISCARDED_PLAYABLE_CARD"]
+                    logging.debug(f"Discarded playable card: assigning {reward} to {proxy.get_player().name}")
                     proxy.reward_player(REWARDS["DISCARDED_PLAYABLE_CARD"])
 
                 # refill the hand
@@ -192,11 +208,10 @@ class HanabiGame:
                 other = self.__find_player_by_name(move.player)
 
                 if self.blue_tokens <= 0 or proxy.get_player() == other:
-                    # raise ValueError("aaa")
-                    proxy.reward_player(REWARDS["ILLEGAL"])
+                    reward = REWARDS["ILLEGAL"]
+                    logging.debug(f"Illegal hint: assigning {reward} to {proxy.get_player().name}")
+                    proxy.reward_player(reward)
                     break
-
-                self.__log(f"Player {proxy.get_player()} hints {move}")
 
                 if isinstance(move, HintColorMove):
                     self.__apply_hint(other, ColorHint(move.color))
@@ -204,6 +219,8 @@ class HanabiGame:
                     self.__apply_hint(other, ValueHint(move.value))
 
                 self.blue_tokens -= 1
+
+            self.__print_state()
 
             self.iter_index += 1
             if early_stop_at and self.iter_index == (early_stop_at * len(self.player_proxies)):
@@ -214,30 +231,22 @@ class HanabiGame:
             if callable(getattr(player, "train", None)):
                 player.train(proxy)
 
-        self.__log(f"Final score: {self.score()}")
-
     def get_turn_index(self):
         return self.iter_index // len(self.player_proxies)
 
-    def __log(self, str):
-        """Log something (if verbose is set)"""
-        if self.verbose:
-            print(str)
-
     def __print_state(self):
-        print(f"Blue tokens: {self.blue_tokens:2d}.")
-        print(f"Red tokens: {self.red_tokens:2d}")
-        print(f"Board: {self.board}")
-        print(f"Discard pile: {self.discard_pile}")
+        logging.debug(f"After {self.iter_index} steps the board state is")
+        logging.debug(f"  Blue tokens: {self.blue_tokens:2d}")
+        logging.debug(f"  Red tokens: {self.red_tokens:2d}")
+        logging.debug(f"  Board: {self.board}")
+        logging.debug(f"  Discard pile: {self.discard_pile}")
 
-        print("Players:")
+        logging.debug(f"  Players:")
         for player_proxy, hand in zip(self.player_proxies, self.hands):
             player = player_proxy.get_player()
-            print(f"- {player}")
 
-            for card, hints in hand:
-                print(f"  has {card} seen as {card.mask(hints)}")
-        print()
+            str_hand = ", ".join(str((card, hints if len(hints) > 0 else {})) for card, hints in hand)
+            logging.debug(f"    {player}: [{str_hand}]")
 
 
 class PlayerGameProxy:
