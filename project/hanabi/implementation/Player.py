@@ -373,16 +373,21 @@ if __name__ == "__main__":
     # Run a game
     from HanabiGame import HanabiGame
 
-    game = HanabiGame()
-
     players = [
-        DRLNonTrainableAgent(f"P{i}", {2: "project/hanabi/implementation/models/drl_2_players.npy"})
-        for i in range(2)
+        DRLNonTrainableAgent(f"P{i}", filenames={
+            2: "models/DQN_2_players.npy",
+            3: "models/DQN_3_players.npy",
+            4: "models/DQN_4_players.npy",
+            5: "models/DQN_5_players.npy"
+        })
+        for i in range(5)
     ]
 
-    game.register_player(players[0])
-    game.register_player(players[1])
+    for n_players in [2, 3, 4, 5]:
+        game = HanabiGame()
 
-    game.start()
+        for p in random.sample(players, n_players):
+            game.register_player(p)
 
-    logging.info(f"Game result: {game.score()}")
+        game.start()
+        logging.info(f"Game result: {game.score()}")
