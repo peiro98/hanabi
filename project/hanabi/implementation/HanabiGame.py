@@ -274,7 +274,7 @@ class PlayerGameProxy:
     def give_reward(self, reward: float):
         self.player.receive_reward(reward)
 
-    def see_hand(self, player: Optional[Player]) -> List[Tuple[Card, List[Hint]]]:
+    def see_hand(self, player: Optional[Player] = None) -> List[Tuple[Card, List[Hint]]]:
         hand = self.game.get_hand_of_player(player or self.player)
 
         if player != self.player:

@@ -47,6 +47,10 @@ class StateEncoder(ABC):
         """
         pass
 
+    def n_players(self) -> int:
+        """Return the number of players for this encoded state"""
+        raise NotImplementedError()
+
 
 class FlatStateEncoder(StateEncoder):
     """Encode the game state in a *flat* (1-D) numpy array
@@ -189,3 +193,7 @@ class FlatStateEncoder(StateEncoder):
             ]
         )
         return np.expand_dims(state, 0)
+    
+    def n_players(self) -> int:
+        """Return the number of players for this encoded state"""
+        return (self.get().size - 32) // 100

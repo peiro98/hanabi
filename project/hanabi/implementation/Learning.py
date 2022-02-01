@@ -14,7 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from Move import HintMove
-from Player import TrainablePlayer
+from Player import TrainablePlayer, DRLNonTrainableAgent
 from actions_decoder import ActionDecoder
 from replay_memory import ReplayMemory, UniformReplayMemory
 from state_encoder import FlatStateEncoder
@@ -400,6 +400,43 @@ class DRLAgent(TrainablePlayer):
             for value in self.frozen_model.state_dict().values():
                 np.save(f, value.numpy())
 
+    def get_numpy_parameters(self):
+        return [value.numpy() for value in self.frozen_model.state_dict().values()]
+
+
+def eval_numpy(player: DRLAgent, n_games, n_players):
+    """Evaluate DQN models"""
+
+    if not isinstance(player.frozen_model, MLPNetwork):
+        raise NotImplementedError("At the moment only MLP networks are supported")
+
+    players = [
+        DRLNonTrainableAgent(f"P{i + 1}", models={
+            n_players: player.get_numpy_parameters()
+        })
+        for i in range(n_players)
+    ]
+
+    # Collect the training scores
+    scores = []
+
+    for _ in range(n_games):
+        # create a new game
+        game = HanabiGame(verbose=False)
+
+        # Register a sample of players to this game
+        for p in players:
+            if isinstance(p, DRLAgent):
+                p.prepare()
+            game.register_player(p)
+
+        # Start the game
+        game.start()
+
+        scores.append(game.score())
+
+    return statistics.mean(scores)
+
 
 def train(args: dict):
     """Train DQN models"""
@@ -448,16 +485,20 @@ def train(args: dict):
 
         avg_training_score = statistics.mean(training_scores[-500:])
         logging.info(
-            f"Game {i + 1}/{num_iterations} ended with score {game.score():.4f}"
-            f"(moving average score of the last 500 scores is {avg_training_score:.4f})"
+            f"Game {i + 1}/{num_iterations} terminated with score {game.score():.4f} "
+            f"(moving average over the last 500 games {avg_training_score:.4f})"
         )
+
+        if (i + 1) and ((i + 1) % args["evaluation_interval"]) == 0:
+            avg_score = eval_numpy(players[0], args["evaluation_num_games"], args["n_players"])
+            logging.info(f"Evaluation score over {args['evaluation_num_games']} games: {avg_score}")
 
     if args["model_save_path"] is not None:
         filename = args["model_save_path"]
 
         # Save the model
-        players[0].save_pytorch_model(f"{filename}.pytorch")
-        players[0].save_numpy_model(f"{filename}.numpy")
+        players[0].save_pytorch_model(f"{filename}.pth")
+        players[0].save_numpy_model(f"{filename}.npy")
 
         with open(f"{filename}.json", "w") as f:
             f.write(json.dumps(args, indent=4))
@@ -551,6 +592,22 @@ if __name__ == "__main__":
         help="Interval between the updates of the target model",
     )
     parser.add_argument(
+        "--evaluation-interval",
+        action="store",
+        dest="evaluation_interval",
+        type=int,
+        default=250,
+        help="Interval between evaluations of the model"
+    )
+    parser.add_argument(
+        "--evaluation-num-games",
+        action="store",
+        dest="evaluation_num_games",
+        type=int,
+        default=100,
+        help="Number of games to simulate during the evaluation phase"
+    )
+    parser.add_argument(
         "--initial-lr", action="store", dest="initial_lr", type=float, default=1e-3, help="Initial learning rate"
     )
     parser.add_argument(
@@ -577,6 +634,11 @@ if __name__ == "__main__":
         datefmt="%m/%d/%Y %I:%M:%S %p",
     )
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
+    logging.info("Starting a new training process with args: {")
+    for key, value in args.items():
+        logging.info(f"  {key}: {value}")
+    logging.info("}")
 
     # and start training
     train(args)
