@@ -2,10 +2,10 @@ import logging
 from typing import Optional, List, Tuple
 import itertools
 
-from hints import ColorHint, Hint, ValueHint
-from cards import Card, Deck
-from moves import DiscardMove, HintColorMove, HintMove, PlayMove
-from players import *
+from .hints import ColorHint, Hint, ValueHint
+from .cards import Card, Deck
+from .moves import DiscardMove, HintColorMove, HintMove, PlayMove
+from .players import *
 
 HAND_SIZE = 5
 
@@ -258,9 +258,23 @@ class PlayerGameProxy:
         return self.player
 
     def count_blue_tokens(self) -> int:
+        """Return the number of blue tokens available
+
+        Returns
+        -------
+        int
+            the number of available blue tokens
+        """
         return self.game.blue_tokens
 
     def count_red_tokens(self) -> int:
+        """Return the number of red tokens available
+
+        Returns
+        -------
+        int
+            the number of available red tokens
+        """
         return self.game.red_tokens
 
     def get_other_players(self) -> List[Player]:
@@ -283,6 +297,13 @@ class PlayerGameProxy:
         return [(card.mask(hints), hints) for (card, hints) in hand]
 
     def see_board(self):
+        """Return the list of cards on the board
+
+        Returns
+        -------
+        List[Card]
+            list of played cards
+        """
         return self.game.get_board()
 
     def see_discard_pile(self):

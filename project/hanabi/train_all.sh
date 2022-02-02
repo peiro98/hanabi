@@ -16,9 +16,9 @@ LR_GAMMA=0.5
 
 for NUM_PLAYERS in 2 3 4 5
 do
-    MODEL_SAVE_PATH="models/DQN_${NUM_PLAYERS}_players"
+    MODEL_SAVE_PATH="rl-models/DQN_${NUM_PLAYERS}_players"
 
-    python learning.py --players $NUM_PLAYERS \
+    python train.py --players $NUM_PLAYERS \
         --training-players $NUM_TRAINING_PLAYER \
         --iterations $N_ITERATIONS \
         --discount $DISCOUNT \

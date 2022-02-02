@@ -2,10 +2,11 @@ from typing import List, Optional
 from random import shuffle
 from itertools import product
 
-from hints import ColorHint, Hint, ValueHint
+from .hints import ColorHint, Hint, ValueHint
 
 # card colors
 CARD_COLORS = ["R", "Y", "G", "B", "W"]
+CARD_COLORS_EXTENDED = ["RED", "YELLOW", "GREEN", "BLUE", "WHITE"]
 
 # number of cards for each value (1, 2, 3, 4, 5)
 CARD_AVAILABILITY = [3, 2, 2, 2, 1]

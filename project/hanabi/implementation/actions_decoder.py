@@ -2,8 +2,8 @@ import random
 from typing import Literal, Optional, Tuple
 
 import numpy as np
-from cards import CARD_COLORS, CARD_VALUES
-from moves import Move, PlayMove, DiscardMove, HintColorMove, HintValueMove
+from .cards import CARD_COLORS, CARD_VALUES
+from .moves import Move, PlayMove, DiscardMove, HintColorMove, HintValueMove
 
 
 class ActionDecoder:

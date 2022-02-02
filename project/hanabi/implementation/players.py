@@ -8,12 +8,12 @@ import sys
 import time
 import logging
 
-from hints import ColorHint
-from moves import Move, PlayMove, DiscardMove, HintMove, HintColorMove, HintValueMove
-from cards import CARD_COLORS, Card
+from .hints import ColorHint
+from .moves import Move, PlayMove, DiscardMove, HintMove, HintColorMove, HintValueMove
+from .cards import CARD_COLORS, Card
 
-from state_encoder import FlatStateEncoder, StateEncoder
-from actions_decoder import ActionDecoder
+from .state_encoder import FlatStateEncoder, StateEncoder
+from .actions_decoder import ActionDecoder
 
 import numpy as np
 
@@ -88,6 +88,12 @@ class Player(ABC):
 
     def __str__(self) -> str:
         return self.name
+
+class UnknownPlayer(Player):
+    """An inscrutable player"""
+
+    def step(self, proxy: "PlayerGameProxy"):
+        raise NotImplementedError()
 
 
 class TrainablePlayer(Player):
@@ -325,9 +331,32 @@ class DRLNonTrainableAgent(Player):
             # invalid move's index
             return False
 
+        if isinstance(action, PlayMove) and proxy.count_red_tokens() == 1:
+            # do not play partially known card or wrong card if there's only one red token left
+            playable = self.get_playable_cards(proxy)
+            hand = [card for card, _ in proxy.see_hand()]
+            card_to_play = hand[action.index]
+
+            if card_to_play not in playable:
+                return False
+
         if isinstance(action, DiscardMove) and len(proxy.see_hand()) <= action.index:
             # invalid move's index
             return False
+
+        if isinstance(action, DiscardMove) and proxy.count_blue_tokens() == 8:
+            # Can't go above 8 blue tokens
+            return False
+
+        if isinstance(action, HintMove):
+            p = next(p for p in proxy.get_other_players() if p.name == action.player)
+            hand = proxy.see_hand(p)
+
+            if isinstance(action, HintColorMove) and all(card.color != action.color for card, _ in hand):
+                return False
+
+            if isinstance(action, HintValueMove) and all(card.value != action.value for card, _ in hand):
+                return False
 
         # TODO: are more checks required?
         return True
