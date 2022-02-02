@@ -105,6 +105,7 @@ class DRLAgent(TrainablePlayer):
         initial_lr=1e-3,
         lr_gamma=0.5,
         lr_step=25_000,
+        device="cpu"
     ) -> None:
         """Instantiate a Double Q-Learning agent
 
@@ -139,12 +140,16 @@ class DRLAgent(TrainablePlayer):
             multiplicative factor of the learning rate, by default 10
         lr_step : int, optional
             interval between the updates of the learning rate, by default 25_000
+        device : str, optional
+            device on which the model should be trained (cpu or cuda)
         """
         super().__init__(name)
 
+        self.device = device
+
         if network_builder is None:
-            self.model = MLPNetwork()
-            self.frozen_model = MLPNetwork()
+            self.model = MLPNetwork().to(self.device)
+            self.frozen_model = MLPNetwork().to(self.device)
         else:
             self.model = network_builder()
             self.frozen_model = network_builder()
@@ -210,12 +215,12 @@ class DRLAgent(TrainablePlayer):
         # Extract the current state from the game's proxy
         encoded_state = self.__get_encoded_state(proxy)
         # Convert the encoded state to a torch float tensor
-        encoded_state = torch.from_numpy(encoded_state).float()
+        encoded_state = torch.from_numpy(encoded_state).float().to(self.device)
 
         # Compute the output of the training model
         self.model.eval()  # Make sure the network is in evaluation mode
         with torch.no_grad():  # Do not generate gradients
-            Q = self.model(encoded_state).squeeze()
+            Q = self.model(encoded_state).squeeze().cpu()
         # Instantiate an action decoder for the network output
         decoder = ActionDecoder(Q.numpy())
 
@@ -242,7 +247,7 @@ class DRLAgent(TrainablePlayer):
             action.player = proxy.get_other_players()[action.player].name
 
         # log state, reward and selected action
-        self.states.append(torch.clone(encoded_state))
+        self.states.append(encoded_state)
         self.rewards.append(0)
         self.actions.append(action_idx)
 
@@ -299,7 +304,8 @@ class DRLAgent(TrainablePlayer):
         next_states = torch.cat(
             [
                 # next_state is None => its previous state was a terminal state
-                next_state if next_state is not None else torch.zeros(batch[0][0].shape)
+                next_state.to(self.device) if next_state is not None 
+                else torch.zeros(batch[0][0].shape, device=self.device)
                 for _, _, _, next_state in batch
             ]
         )
@@ -314,7 +320,7 @@ class DRLAgent(TrainablePlayer):
 
         _, selected_actions = torch.max(next_Q_online, 1)
         # One hot encode the actions on axis 1
-        selected_actions = torch.nn.functional.one_hot(selected_actions, num_classes=next_Q_online.shape[1])
+        selected_actions = torch.nn.functional.one_hot(selected_actions, num_classes=next_Q_online.shape[1]).to(self.device)
 
         #####################
         # Action evaluation #
@@ -326,7 +332,7 @@ class DRLAgent(TrainablePlayer):
 
         # For each action, take the corresponding Q value computed by the target model
         # and sum to the actual rewards obtained.
-        rewards = torch.tensor([reward for _, _, reward, _ in batch])
+        rewards = torch.tensor([reward for _, _, reward, _ in batch], device=self.device)
         # The sum is used to obtain the only non-zero element on each row
         next_Q = rewards + self.discount * torch.sum(next_Q_target * selected_actions, 1)
 
@@ -335,12 +341,12 @@ class DRLAgent(TrainablePlayer):
         ########################
 
         # Compute the Q values for the states using the training models
-        states = torch.cat([state for state, _, _, _ in batch])
+        states = torch.cat([state.to(self.device) for state, _, _, _ in batch])
         current_Q = self.model(states)
 
         # One-hot encode the actual actions performed as part of the experience of the agent
-        actions = torch.tensor([action for _, action, _, _ in batch])
-        actions_one_hot = torch.nn.functional.one_hot(actions, num_classes=current_Q.shape[1])
+        actions = torch.tensor([action for _, action, _, _ in batch], device=self.device)
+        actions_one_hot = torch.nn.functional.one_hot(actions, num_classes=current_Q.shape[1]).to(self.device)
         # Compute the Q value for the pairs (current_state, performed_action)
         current_Q = torch.sum(current_Q * actions_one_hot, 1)
 
@@ -398,7 +404,7 @@ class DRLAgent(TrainablePlayer):
         with open(path, "wb") as f:
             # values are save as fc1.weight, fc1.bias, fc2.weight, fc2.bias, ...
             for value in self.frozen_model.state_dict().values():
-                np.save(f, value.numpy())
+                np.save(f, value.cpu().numpy())
 
     def get_numpy_parameters(self):
         return [value.numpy() for value in self.frozen_model.state_dict().values()]
@@ -441,8 +447,13 @@ def eval_numpy(player: DRLAgent, n_games, n_players):
 def train(args: dict):
     """Train DQN models"""
 
+    if args["device"] == "gpu" and torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+
     # Generate the training players
-    network_builder = lambda: MLPNetwork(n_players=args["n_players"])
+    network_builder = lambda: MLPNetwork(n_players=args["n_players"]).to(device)
     players = []
 
     for i in range(args["n_training_players"]):
@@ -460,6 +471,7 @@ def train(args: dict):
             "initial_lr": args["initial_lr"],
             "lr_gamma": args["lr_gamma"],
             "lr_step": args["lr_step"],
+            "device": device
         }
 
         players.append(DRLAgent(f"P{i}", network_builder, **player_args))

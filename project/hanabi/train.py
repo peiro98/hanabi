@@ -121,6 +121,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-save-path", action="store", dest="model_save_path", type=str, help="Destination path for the model"
     )
+    parser.add_argument("--device", action="store", dest="device", default="cpu", type=str, choices=["cpu", "gpu"])
 
     # Parse the arguments
     args = vars(parser.parse_args())
@@ -131,7 +132,7 @@ if __name__ == "__main__":
     filename = time.strftime("%Y_%m_%d-%I_%M_%S_%p")
     logging.basicConfig(
         filename=f"logs/{filename}.log",
-        level=logging.DEBUG,
+        level=logging.INFO,
         format="%(asctime)s %(levelname)s: %(message)s",
         datefmt="%m/%d/%Y %I:%M:%S %p",
     )
