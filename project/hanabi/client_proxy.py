@@ -216,11 +216,13 @@ class Proxy(PlayerGameProxy):
 
         logging.info(str(hand) + str(positions))
 
-        for position in positions:
+        for i in range(len(hand)):
             if type == "color":
                 color = value[0].upper()  # make sure the color is a single uppercase char
                 hint = ColorHint(color)
             else:
                 hint = ValueHint(value)
-            if hint not in hand[position][1]:
-                hand[position][1].append(hint)
+            if i in positions and hint not in hand[i][1]:
+                hand[i][1].append(hint)
+            if i not in positions and hint not in hand[i][1]:
+                hand[i][1].append(~hint)

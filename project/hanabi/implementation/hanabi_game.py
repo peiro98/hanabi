@@ -114,7 +114,8 @@ class HanabiGame:
         idx = next(i for i, p in enumerate(self.player_proxies) if p.get_player() == player)
 
         self.hands[idx] = [
-            (card, hints | set([hint])) if (hint.color == card.color or hint.value == card.value) else (card, hints)
+            (card, hints | set([hint])) if (hint.color == card.color or hint.value == card.value) 
+            else (card, hints | set([~hint]))
             for card, hints in self.hands[idx]
         ]
 

@@ -135,16 +135,17 @@ class FlatStateEncoder(StateEncoder):
                 # assert(len(hints) <= 2)
                 for hint in hints:
                     # for each hint provided for this card
+                    factor = -1 if hint.negative else 1
 
                     if isinstance(hint, ColorHint):
                         color_idx = CARD_COLORS.index(hint.color)
                         # the entries [10..14] of each card's state encode the color
-                        self.players_state[state_idx + 10 + color_idx] = 1
+                        self.players_state[state_idx + 10 + color_idx] = 1 * factor
 
                     elif isinstance(hint, ValueHint):
                         # the entries [15..19] of each card's state encode the value
                         value_idx = CARD_VALUES.index(hint.value)
-                        self.players_state[state_idx + 15 + value_idx] = 1
+                        self.players_state[state_idx + 15 + value_idx] = 1 * factor
 
         # 2. Encode the board state
 

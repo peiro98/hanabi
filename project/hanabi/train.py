@@ -131,7 +131,7 @@ if __name__ == "__main__":
     filename = time.strftime("%Y_%m_%d-%I_%M_%S_%p")
     logging.basicConfig(
         filename=f"logs/{filename}.log",
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s %(levelname)s: %(message)s",
         datefmt="%m/%d/%Y %I:%M:%S %p",
     )
