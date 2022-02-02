@@ -1,12 +1,8 @@
 import random
-import argparse
 import statistics
 from collections import defaultdict
 import json
-import time
 import logging
-import sys
-import os
 
 import numpy as np
 import torch
@@ -105,7 +101,7 @@ class DRLAgent(TrainablePlayer):
         initial_lr=1e-3,
         lr_gamma=0.5,
         lr_step=25_000,
-        device="cpu"
+        device="cpu",
     ) -> None:
         """Instantiate a Double Q-Learning agent
 
@@ -149,10 +145,10 @@ class DRLAgent(TrainablePlayer):
 
         if network_builder is None:
             self.model = MLPNetwork().to(self.device)
-            self.frozen_model = MLPNetwork().to(self.device)
+            self.target_model = MLPNetwork().to(self.device)
         else:
             self.model = network_builder()
-            self.frozen_model = network_builder()
+            self.target_model = network_builder()
 
         self.discount = discount
         self.training = training
@@ -191,11 +187,6 @@ class DRLAgent(TrainablePlayer):
         self.states = []
         self.rewards = []
         self.actions = []
-
-        # periodically the target model is refreshed
-        if (self.played_games % self.target_model_refresh_interval) == 0:
-            self.frozen_model.load_state_dict(self.model.state_dict())
-            logging.debug(f"{self.name} refreshed the target model")
 
     def __get_encoded_state(self, proxy: "PlayerGameProxy") -> torch.tensor:
         """Encode the current game state"""
@@ -291,7 +282,7 @@ class DRLAgent(TrainablePlayer):
         self.__update_epsilon(proxy.get_turn_index())
 
         # Set the target model in evaluation mode
-        self.frozen_model.eval()
+        self.target_model.eval()
         # and the training model in training mode
         self.model.train()
 
@@ -304,7 +295,8 @@ class DRLAgent(TrainablePlayer):
         next_states = torch.cat(
             [
                 # next_state is None => its previous state was a terminal state
-                next_state.to(self.device) if next_state is not None 
+                next_state.to(self.device)
+                if next_state is not None
                 else torch.zeros(batch[0][0].shape, device=self.device)
                 for _, _, _, next_state in batch
             ]
@@ -320,7 +312,9 @@ class DRLAgent(TrainablePlayer):
 
         _, selected_actions = torch.max(next_Q_online, 1)
         # One hot encode the actions on axis 1
-        selected_actions = torch.nn.functional.one_hot(selected_actions, num_classes=next_Q_online.shape[1]).to(self.device)
+        selected_actions = torch.nn.functional.one_hot(selected_actions, num_classes=next_Q_online.shape[1]).to(
+            self.device
+        )
 
         #####################
         # Action evaluation #
@@ -328,7 +322,7 @@ class DRLAgent(TrainablePlayer):
 
         # Evaluate Q for the NEXT STATE(S) according to the TARGET NETWORK
         with torch.no_grad():
-            next_Q_target = self.frozen_model(next_states)
+            next_Q_target = self.target_model(next_states)
 
         # For each action, take the corresponding Q value computed by the target model
         # and sum to the actual rewards obtained.
@@ -369,7 +363,7 @@ class DRLAgent(TrainablePlayer):
             exit(1)
 
         self.training_losses.append(loss.item())
-        avg_training_loss = statistics.mean(self.training_losses)
+        avg_training_loss = statistics.mean(self.training_losses[-100:])
         logging.info(f"{self.name} got training loss {loss:.4f} (average loss is {avg_training_loss:.4f})")
 
         # Compute the gradients from the loss
@@ -383,6 +377,11 @@ class DRLAgent(TrainablePlayer):
         # Update the number of played games
         self.played_games += 1
 
+        # periodically the target model is refreshed
+        if (self.played_games % self.target_model_refresh_interval) == 0:
+            self.target_model.load_state_dict(self.model.state_dict())
+            logging.debug(f"{self.name} refreshed the target model")
+
     def save_pytorch_model(self, path: str):
         """Save the current PyTorch model
 
@@ -391,7 +390,7 @@ class DRLAgent(TrainablePlayer):
         path : str
             destination path
         """
-        torch.save(self.frozen_model.state_dict(), path)
+        torch.save(self.target_model.state_dict(), path)
 
     def save_numpy_model(self, path: str):
         """Save the current model as numpy arrays
@@ -403,24 +402,21 @@ class DRLAgent(TrainablePlayer):
         """
         with open(path, "wb") as f:
             # values are save as fc1.weight, fc1.bias, fc2.weight, fc2.bias, ...
-            for value in self.frozen_model.state_dict().values():
+            for value in self.target_model.state_dict().values():
                 np.save(f, value.cpu().numpy())
 
     def get_numpy_parameters(self):
-        return [value.numpy() for value in self.frozen_model.state_dict().values()]
+        return [value.cpu().numpy() for value in self.target_model.state_dict().values()]
 
 
 def eval_numpy(player: DRLAgent, n_games, n_players):
     """Evaluate DQN models"""
 
-    if not isinstance(player.frozen_model, MLPNetwork):
+    if not isinstance(player.target_model, MLPNetwork):
         raise NotImplementedError("At the moment only MLP networks are supported")
 
     players = [
-        DRLNonTrainableAgent(f"P{i + 1}", models={
-            n_players: player.get_numpy_parameters()
-        })
-        for i in range(n_players)
+        DRLNonTrainableAgent(f"P{i + 1}", models={n_players: player.get_numpy_parameters()}) for i in range(n_players)
     ]
 
     # Collect the training scores
@@ -471,7 +467,7 @@ def train(args: dict):
             "initial_lr": args["initial_lr"],
             "lr_gamma": args["lr_gamma"],
             "lr_step": args["lr_step"],
-            "device": device
+            "device": device,
         }
 
         players.append(DRLAgent(f"P{i}", network_builder, **player_args))
@@ -495,10 +491,10 @@ def train(args: dict):
 
         training_scores.append(game.score())
 
-        avg_training_score = statistics.mean(training_scores[-500:])
+        avg_training_score = statistics.mean(training_scores[-100:])
         logging.info(
             f"Game {i + 1}/{num_iterations} terminated with score {game.score():.4f} "
-            f"(moving average over the last 500 games {avg_training_score:.4f})"
+            f"(moving average over the last 100 games {avg_training_score:.4f})"
         )
 
         if (i + 1) and ((i + 1) % args["evaluation_interval"]) == 0:
@@ -514,4 +510,3 @@ def train(args: dict):
 
         with open(f"{filename}.json", "w") as f:
             f.write(json.dumps(args, indent=4))
-
