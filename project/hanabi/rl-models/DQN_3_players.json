@@ -1,0 +1,19 @@
+{
+    "n_players": 3,
+    "n_training_players": 5,
+    "n_iterations": 50000,
+    "discount": 0.25,
+    "batch_size": 64,
+    "initial_eps": 1.0,
+    "eps_step": 0.99995,
+    "minimum_eps": 0.1,
+    "turn_dependent_eps": true,
+    "target_model_refresh_interval": 5000,
+    "evaluation_interval": 10000,
+    "evaluation_num_games": 100,
+    "initial_lr": 0.001,
+    "lr_step": 20000,
+    "lr_gamma": 0.5,
+    "model_save_path": "rl-models/DQN_3_players",
+    "device": "gpu"
+}
