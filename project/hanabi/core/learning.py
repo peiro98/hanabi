@@ -21,7 +21,7 @@ from .hanabi_game import HanabiGame
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from project.hanabi.implementation.hanabi_game import PlayerGameProxy
+    from project.hanabi.core.hanabi_game import PlayerGameProxy
 
 
 class MLPNetwork(nn.Module):

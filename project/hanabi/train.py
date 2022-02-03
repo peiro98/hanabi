@@ -4,7 +4,7 @@ import time
 import sys
 import os
 
-from implementation.learning import train
+from core.learning import train
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

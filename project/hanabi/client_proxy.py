@@ -1,11 +1,11 @@
 import logging
 from typing import List, Optional, Tuple, Union
 
-from implementation.cards import Card
-from implementation.hints import Hint, ValueHint, ColorHint
-from implementation.hanabi_game import PlayerGameProxy
-from implementation.players import Player, UnknownPlayer
-from implementation.moves import Move
+from core.cards import Card
+from core.hints import Hint, ValueHint, ColorHint
+from core.hanabi_game import PlayerGameProxy
+from core.players import Player, UnknownPlayer
+from core.moves import Move
 
 
 class Proxy(PlayerGameProxy):

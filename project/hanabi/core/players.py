@@ -21,7 +21,7 @@ import numpy as np
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from project.hanabi.implementation.hanabi_game import PlayerGameProxy
+    from project.hanabi.core.hanabi_game import PlayerGameProxy
 
 
 class Player(ABC):
@@ -399,7 +399,7 @@ if __name__ == "__main__":
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
 
     # Run a game
-    from project.hanabi.implementation.hanabi_game import HanabiGame
+    from project.hanabi.core.hanabi_game import HanabiGame
 
     players = [
         DRLNonTrainableAgent(f"P{i}", filenames={

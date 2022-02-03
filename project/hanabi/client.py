@@ -11,16 +11,17 @@
 from sys import argv
 import logging
 import sys
+import time
 
 import socket
 
 import GameData
 from constants import *
 
-from implementation.cards import CARD_COLORS, CARD_COLORS_EXTENDED, Card
-from implementation.moves import DiscardMove, HintColorMove, HintValueMove, PlayMove
+from core.cards import CARD_COLORS, CARD_COLORS_EXTENDED, Card
+from core.moves import DiscardMove, HintColorMove, HintValueMove, PlayMove
 from client_proxy import Proxy
-from implementation.players import DRLNonTrainableAgent
+from core.players import DRLNonTrainableAgent
 
 if len(argv) < 4:
     print("You need the player name to start the game.")
@@ -296,8 +297,13 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             proxy.clean()
 
             # logging.info("Ready for a new game!")
+            
             # done
-            # run = False
+            run = False
+
+            # start again
+            # time.sleep(.5)
+            # s.send(GameData.ClientPlayerStartRequest(playerName).serialize())
 
         if not dataOk:
             logging.error("Unknown or unimplemented data type: " + str(type(data)))

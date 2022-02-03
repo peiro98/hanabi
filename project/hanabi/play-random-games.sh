@@ -1,13 +1,13 @@
 #!/bin/sh
 
-set -x
+# set -x
 
 for i in {0..100}
 do
     echo "Running game n. ${i}"
 
     N_PLAYERS=$((2 + $RANDOM % 4))
-    python server.py $N_PLAYERS &>> full-logs.txt &
+    python server.py $N_PLAYERS 1>>/dev/null 2>> server-errors.log &
     SERVER_PID=$!
 
     sleep 1
@@ -21,7 +21,7 @@ do
 
     for (( n=0; n<$N_PLAYERS; n++ ))
     do 
-        python new-client.py 127.0.0.1 1024 "RL${n}" &>> full-client-logs.txt & 
+        python client.py 127.0.0.1 1024 "RL${n}" 1>>/dev/null 2>> client-errors.log & 
     done
 
     wait
