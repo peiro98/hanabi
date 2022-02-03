@@ -1,6 +1,3 @@
-from torch import negative
-
-
 class Hint:
     """An hint
 
