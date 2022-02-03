@@ -238,7 +238,7 @@ class DRLAgent(TrainablePlayer):
             action.player = proxy.get_other_players()[action.player].name
 
         # log state, reward and selected action
-        self.states.append(encoded_state)
+        self.states.append(encoded_state.cpu())
         self.rewards.append(0)
         self.actions.append(action_idx)
 
