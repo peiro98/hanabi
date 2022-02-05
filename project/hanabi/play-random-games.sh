@@ -26,7 +26,6 @@ do
 
     wait
 
-    kill $(lsof -t -i:1024)
 
     sleep 1
 

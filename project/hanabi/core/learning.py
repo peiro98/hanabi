@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from .moves import HintMove
 from .players import TrainablePlayer, DRLNonTrainableAgent
 from .actions_decoder import ActionDecoder
-from .replay_memory import ReplayMemory, UniformReplayMemory
+from .replay_memory import PositiveNegativeReplayMemory, ReplayMemory, UniformReplayMemory
 from .state_encoder import FlatStateEncoder
 from .hanabi_game import HanabiGame
 
@@ -452,6 +452,16 @@ def train(args: dict):
     network_builder = lambda: MLPNetwork(n_players=args["n_players"]).to(device)
     players = []
 
+    # Replay memory builder
+    replay_memory_size = args["replay_memory_size"]
+    if args["replay_memory"] == "uniform":
+        replay_memory_builder = lambda: UniformReplayMemory(replay_memory_size)
+    elif args["replay_memory"] == "positive-negative":
+        positive_percentage = args["replay_memory_pn_percentage"]
+        replay_memory_builder = lambda: PositiveNegativeReplayMemory(
+            replay_memory_size // 2, replay_memory_size // 2, positive_percentage
+        )
+
     for i in range(args["n_training_players"]):
         # Prepare the parameters for the agents
         player_args = {
@@ -463,7 +473,7 @@ def train(args: dict):
             "turn_dependent_eps": args["turn_dependent_eps"],
             "batch_size": args["batch_size"],
             "target_model_refresh_interval": args["target_model_refresh_interval"],
-            "replay_memory": UniformReplayMemory(384 * 1024),
+            "replay_memory": replay_memory_builder(),
             "initial_lr": args["initial_lr"],
             "lr_gamma": args["lr_gamma"],
             "lr_step": args["lr_step"],

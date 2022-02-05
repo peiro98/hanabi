@@ -55,6 +55,8 @@ if __name__ == "__main__":
         type=int,
         help="Batch size",
     )
+
+    # Eps-greedy strategy parameters
     parser.add_argument(
         "--initial-eps",
         action="store",
@@ -85,6 +87,8 @@ if __name__ == "__main__":
         dest="turn_dependent_eps",
         help="If present, the epsilon coefficient is a function of the turn index",
     )
+
+    # Target model parameters
     parser.add_argument(
         "--target-refresh-interval",
         action="store",
@@ -93,6 +97,8 @@ if __name__ == "__main__":
         default=1000,
         help="Interval between the updates of the target model",
     )
+
+    # Evaluation parameters
     parser.add_argument(
         "--evaluation-interval",
         action="store",
@@ -109,6 +115,8 @@ if __name__ == "__main__":
         default=100,
         help="Number of games to simulate during the evaluation phase",
     )
+
+    # Learning rate parameters
     parser.add_argument(
         "--initial-lr", action="store", dest="initial_lr", type=float, default=1e-3, help="Initial learning rate"
     )
@@ -118,9 +126,42 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lr-gamma", action="store", dest="lr_gamma", type=float, default=0.5, help="Learning rate gamma factor"
     )
+
+    # Replay memory configuration
+    parser.add_argument(
+        "--replay-memory",
+        action="store",
+        dest="replay_memory",
+        type=str,
+        choices=["uniform", "positive-negative"],
+        default="uniform",
+        help="Experience replay memory"
+    )
+
+    parser.add_argument(
+        "--replay-memory-size",
+        action="store",
+        dest="replay_memory_size",
+        type=int,
+        default=393216, # 384*1024 (best i could do on my hardware)
+        help="Experience replay memory size"
+    )
+
+    parser.add_argument(
+        "--replay-memory-pn-positive-percentage",
+        action="store",
+        dest="replay_memory_pn_percentage",
+        type=float,
+        default=0.75,
+        help="Percentage of positive experiences samples (only available for 'positive-negative' replay memory)"
+    )
+
+    # Models save path
     parser.add_argument(
         "--model-save-path", action="store", dest="model_save_path", type=str, help="Destination path for the model"
     )
+
+    # Device
     parser.add_argument("--device", action="store", dest="device", default="cpu", type=str, choices=["cpu", "gpu"])
 
     # Parse the arguments
