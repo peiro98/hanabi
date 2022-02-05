@@ -7,7 +7,7 @@ The Hanabi problem is tackled using a Deep Reinforcement Learning approach inspi
 
 The following equation determines the target Q value for the current state and the selected action (S, a). The best action to be performed in the next state S<sub>t+1</sub> is selected according to the online network θ<sub>t</sub> and evaluated on the offline (target) network θ<sub>t</sub><sup>-</sup>. The target network is a copy of the online network at fixed time instances.
 
-<img src="https://render.githubusercontent.com/render/math?math=Y_%7Btarget%7D%20%3D%20R_%7Bt%2B1%7D%20%2B%20%5Cgamma%20Q%20(S_%7Bt%2B1%7D%2C%20%5Cargmax_%7Ba%7D%20Q(S_%7Bt%2B1%7D%2C%20a%3B%20%5Ctheta_t)%2C%20%5Ctheta_t%5E%7B-%7D)">
+<img src="https://render.githubusercontent.com/render/math?math=%7B%5Ccolor%7Bgray%7DY_%7Btarget%7D%20%3D%20R_%7Bt%2B1%7D%20%2B%20%5Cgamma%20Q%20(S_%7Bt%2B1%7D%2C%20%5Cargmax_%7Ba%7D%20Q(S_%7Bt%2B1%7D%2C%20a%3B%20%5Ctheta_t)%2C%20%5Ctheta_t%5E%7B-%7D)%7D">
 
 
 Furthermore, experience replay is used to keep a memory of the last 384k observed pairs of *(state, action, reward, next_state)*. At the end of each game, the states collected are moved to the experience replay memory. Then, a batch is sampled from the memory and used to train the network.
